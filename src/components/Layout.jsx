@@ -50,6 +50,9 @@ const Sidebar = () => {
 
     // Locking Logic
     const isLocked = (path) => {
+        // Unlocked for testing and demo purposes
+        return false;
+        /*
         if (path === '/' || path === '/admin' || path === '/config') return false;
         if (path === '/assortment') return localStorage.getItem('prereq_masterDataSynced') !== 'true';
         if (path === '/supply-parameter') return localStorage.getItem('prereq_assortmentConfirmed') !== 'true';
@@ -59,6 +62,7 @@ const Sidebar = () => {
         if (path === '/inventory') return localStorage.getItem('bridge_step3') !== 'SUCCESS'; // Unlocked alongside 1.4 for demo/testing
         // if (path === '/shipments') return localStorage.getItem('bridge_step5') !== 'SUCCESS'; // Unlocked for demo
         return false;
+        */
     };
 
     return (
