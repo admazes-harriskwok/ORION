@@ -1,92 +1,94 @@
-import React, { useState, useEffect, useMemo } from 'react';
-import { useAuth } from '../context/AuthContext';
-import {
-    CheckCircle,
-    AlertTriangle,
-    Search,
-    RefreshCw,
-    Database,
-    ArrowRight,
-    Shield,
-    Box,
-    Truck,
-    Edit3,
-    Trash2,
-    Filter,
-    Layers,
-    Zap,
-    CheckSquare,
-    Square,
-    Loader2,
-    X,
-    ExternalLink,
-    DollarSign,
-    Plus,
-    Calendar,
-    Factory
-} from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Package, Truck, CheckCircle, AlertCircle, RefreshCw, Send, Loader2, Globe, FileText, Zap, ChevronRight, User, CheckSquare, Square, ShieldCheck, Database, Terminal, Eye, EyeOff, Sparkles, Server } from 'lucide-react';
 import { clsx } from 'clsx';
-import Papa from 'papaparse';
-import { manageOrders, fetchWorkingOrders, BASE_URL } from '../utils/api';
-import ConnectionError from '../components/ConnectionError';
+import { fetchWorkingOrders, calculateOrders, fetchIntegrationLogs } from '../utils/api';
+import { useAuth } from '../context/AuthContext';
 
-const ProductionReview = () => {
-    const { user, role } = useAuth();
+import { useNavigate } from 'react-router-dom';
+
+const Production = () => {
+    const navigate = useNavigate();
+    const { role, setRole } = useAuth(); // Assuming setRole exists for the toggle
     const [orders, setOrders] = useState([]);
+    const [logs, setLogs] = useState([]);
     const [loading, setLoading] = useState(true);
-    const [error, setError] = useState(null);
-    const [searchTerm, setSearchTerm] = useState("");
-    const [selectedIds, setSelectedIds] = useState([]);
     const [isProcessing, setIsProcessing] = useState(false);
+    const [isSimulating, setIsSimulating] = useState(false);
+    const [showLogs, setShowLogs] = useState(false);
+    const [editingOrder, setEditingOrder] = useState(null);
+    const [showNextStep, setShowNextStep] = useState(false);
+    const [lastRefresh, setLastRefresh] = useState(null);
+    const [showSyncBanner, setShowSyncBanner] = useState(false);
 
-    // For Edit Qty Modal
-    const [editItem, setEditItem] = useState(null);
-    const [newQty, setNewQty] = useState(0);
-
-
-
-    const loadOrders = async () => {
-        setLoading(true);
-        setError(null);
+    const loadData = async (showSpinner = true) => {
+        if (showSpinner) setLoading(true);
         try {
-            const data = await fetchWorkingOrders();
-            const list = Array.isArray(data) ? data : [];
-
-            // APPLY SLICE LOGIC:
-            // [Status] = "PROPOSAL" AND [Months_Away] <= 4
-            const actionable = list.filter(row => {
-                const statusMatch = (row.Status || row.status || "").toUpperCase() === "PROPOSAL";
-                const monthsAway = parseInt(row.Months_Away || row.monthsAway || 0);
-                return statusMatch && monthsAway <= 4;
-            });
-            setOrders(actionable);
+            const [ordersData, logsData] = await Promise.all([
+                fetchWorkingOrders(),
+                fetchIntegrationLogs()
+            ]);
+            setOrders(ordersData);
+            setLogs(logsData);
+            setLastRefresh(new Date());
         } catch (err) {
-            setError("Failed to fetch latest working orders from API.");
-            console.error(err);
+            console.error("Production Page Load Error:", err);
         } finally {
             setLoading(false);
         }
     };
 
     useEffect(() => {
-        loadOrders();
+        loadData();
     }, []);
 
-    // ACTIONS
-    const handleConfirm = async (planIds) => {
-        if (!planIds.length) return;
+    const handleGenerateOrders = async () => {
         setIsProcessing(true);
         try {
-            await manageOrders(planIds, 'OKSUP');
+            await calculateOrders("GENERATE");
+            alert("SUCCESS: Working Order Proposals created.");
+            await loadData(false);
+        } catch (err) {
+            alert("Generation failed: " + err.message);
+        } finally {
+            setIsProcessing(false);
+        }
+    };
 
-            // Optimistic Update
-            setOrders(prev => prev.filter(o => !planIds.includes(o.Plan_ID)));
-            setSelectedIds(prev => prev.filter(id => !planIds.includes(id)));
+    const handleConfirmOrder = async (order) => {
+        // Validation: Ensure FRI Date is provided
+        if (!order.friDate || order.friDate === '') {
+            alert('❌ VALIDATION ERROR\n\nPlease provide a Factory Ready Inspection (FRI) Date before confirming this order.');
+            return;
+        }
 
-            alert(`Phase 1 Triggered: Status updated to OKSUP for ${planIds.length} orders. PSS Transfer scheduled.`);
+        // Validation: Ensure Trigger Qty is valid
+        if (!order.triggerQty || order.triggerQty <= 0) {
+            alert('❌ VALIDATION ERROR\n\nPlease provide a valid Trigger Quantity before confirming this order.');
+            return;
+        }
 
-            // Reload to stay in sync
-            setTimeout(loadOrders, 2000);
+        setIsProcessing(true);
+        try {
+            await calculateOrders("CONFIRM_ORDER", {
+                plan_id: order.planId,
+                fri_date: order.friDate,
+                trigger_qty: order.triggerQty
+            });
+            alert(`SUCCESS: Order ${order.planId} confirmed and EDI 850 logged.`);
+            await loadData(false);
+
+            // Check if all orders are now confirmed, if so, enable auto-navigation
+            const updatedOrders = await fetchWorkingOrders();
+            const remainingPending = updatedOrders.filter(o =>
+                o.status === 'PROPOSAL' || o.status === 'PENDING_APPROVAL'
+            ).length;
+
+            if (remainingPending === 0) {
+                const allConfirmed = updatedOrders.filter(o => o.status === 'CONFIRMED_RPO').length;
+                if (allConfirmed > 0 && confirm(`✅ ALL ORDERS CONFIRMED!\n\n${allConfirmed} orders are now in CONFIRMED_RPO status.\n\nWould you like to proceed to the Inventory Management page (Step 1.5)?`)) {
+                    navigate('/inventory');
+                }
+            }
         } catch (err) {
             alert("Confirmation failed: " + err.message);
         } finally {
@@ -94,307 +96,407 @@ const ProductionReview = () => {
         }
     };
 
-    const handleReject = (planId) => {
-        if (window.confirm("Are you sure you want to REJECT this proposal? This will set status to CANCELLED.")) {
-            // In a real app, this would hit an API. Here we simulate the AppSheet "Set values" local update.
-            setOrders(prev => prev.filter(o => o.Plan_ID !== planId));
-            alert(`Order ${planId} has been REJECTED and set to CANCELLED.`);
+    const handleBulkSimulation = async () => {
+        const pendingCount = orders.filter(o => o.status === 'PROPOSAL' || o.status === 'PENDING_APPROVAL').length;
+        if (!confirm(`SIMULATION MODE: This will auto-generate supplier inputs and confirm ${pendingCount} pending orders. Proceed?`)) return;
+
+        setIsSimulating(true);
+        try {
+            console.log('[BULK SIMULATION] Sending action: SIMULATE_INPUTS');
+            console.log('[BULK SIMULATION] Pending orders count:', pendingCount);
+
+            const response = await calculateOrders("SIMULATE_INPUTS");
+
+            console.log('[BULK SIMULATION] Backend response:', response);
+
+            // Optimistic Client-Side Update (Immediate UI Feedback)
+            setOrders(prevOrders => prevOrders.map(o => {
+                if (o.status === 'PROPOSAL' || o.status === 'PENDING_APPROVAL') {
+                    return { ...o, status: 'CONFIRMED_RPO', triggerQty: o.proposedQty, friDate: '2026-03-20' }; // Defaulting values for demo visual
+                }
+                return o;
+            }));
+
+            // Show sync banner
+            setShowSyncBanner(true);
+
+            // Extended delay + multiple refresh attempts to handle Google Sheets sync latency
+            setTimeout(() => loadData(false), 5000);  // First refresh at 5s
+            setTimeout(() => loadData(false), 8000);  // Second refresh at 8s
+            setTimeout(() => loadData(false), 12000); // Final refresh at 12s
+
+            // Hide banner after refresh cycle completes
+            setTimeout(() => setShowSyncBanner(false), 15000);
+
+            setShowNextStep(true);
+            alert(`Bulk Confirmation Complete: ${pendingCount} Orders moved to CONFIRMED_RPO status.\n\nNote: Data will auto-refresh over the next 12 seconds to sync with the backend.\n\nBackend Response: ${JSON.stringify(response)}`);
+        } catch (err) {
+            console.error('[BULK SIMULATION] Error:', err);
+            alert("Simulation Failed: " + err.message + "\n\nPlease check the browser console and n8n workflow execution logs.");
+            setShowSyncBanner(false);
+        } finally {
+            setIsSimulating(false);
         }
     };
 
-    const handleEditSave = () => {
-        setOrders(prev => prev.map(o => o.Plan_ID === editItem.Plan_ID ? { ...o, Order_Quantity: newQty } : o));
-        setEditItem(null);
-        alert("Quantity updated successfully.");
-    };
+    const handleInputChange = (planId, field, value) => {
+        // Over-production validation for Trigger Qty
+        if (field === 'triggerQty') {
+            const order = orders.find(o => o.planId === planId);
+            if (order) {
+                const proposedQty = parseInt(order.proposedQty);
+                const newTriggerQty = parseInt(value);
+                const overProductionThreshold = proposedQty * 1.20; // 20% above proposed
 
-    // FILTERING & GROUPING LOGIC
-    const filteredOrders = useMemo(() => {
-        return orders.filter(o => {
-            const search = searchTerm.toLowerCase();
-            return (o.Product_Code || "").toLowerCase().includes(search) ||
-                (o.Supplier_Name || "").toLowerCase().includes(search) ||
-                (o.Supplier_Code || "").toLowerCase().includes(search);
-        });
-    }, [orders, searchTerm]);
-
-    const groupedOrders = useMemo(() => {
-        const groups = {};
-        filteredOrders.forEach(order => {
-            const supplier = order.Supplier_Code || order.Supplier_Name || "Unassigned";
-            const month = order.Month || "Pending";
-
-            if (!groups[supplier]) groups[supplier] = {};
-            if (!groups[supplier][month]) groups[supplier][month] = [];
-
-            groups[supplier][month].push(order);
-        });
-
-        // Sort orders within groups by Target_Date
-        Object.keys(groups).forEach(s => {
-            Object.keys(groups[s]).forEach(m => {
-                groups[s][m].sort((a, b) => new Date(a.Target_Date) - new Date(b.Target_Date));
-            });
-        });
-
-        return groups;
-    }, [filteredOrders]);
-
-    const handleSelectAll = () => {
-        if (selectedIds.length === filteredOrders.length && filteredOrders.length > 0) {
-            setSelectedIds([]);
-        } else {
-            setSelectedIds(filteredOrders.map(o => o.Plan_ID));
+                if (newTriggerQty > overProductionThreshold) {
+                    const overPercentage = ((newTriggerQty - proposedQty) / proposedQty * 100).toFixed(1);
+                    alert(`⚠️ OVER-PRODUCTION DETECTED\n\nYour trigger quantity (${newTriggerQty}) exceeds the proposed quantity (${proposedQty}) by ${overPercentage}%.\n\n⚠️ Please justify this quantity to GS Ops before proceeding.`);
+                }
+            }
         }
+
+        setOrders(prev => prev.map(o => o.planId === planId ? { ...o, [field]: value } : o));
     };
 
-    if (role !== 'OPS') {
-        return (
-            <div className="flex flex-col items-center justify-center min-h-[400px] text-center p-10 bg-white rounded-[3rem] border border-slate-100 shadow-sm">
-                <div className="w-20 h-20 bg-rose-50 rounded-full flex items-center justify-center text-rose-500 mb-6 border border-rose-100">
-                    <AlertTriangle size={40} />
-                </div>
-                <h2 className="text-2xl font-black text-slate-800 uppercase tracking-tight">Access Restricted</h2>
-                <p className="text-slate-500 max-w-sm mt-2">The Production Review console is reserved for Internal Ops Managers.</p>
-            </div>
-        );
-    }
+    if (loading) return (
+        <div className="flex items-center justify-center min-h-[400px]">
+            <div className="w-12 h-12 border-4 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
+        </div>
+    );
 
     return (
         <div className="space-y-10 animate-in fade-in duration-500 pb-20">
-            {/* Header / Filter Section */}
-            <div className="flex justify-between items-end bg-white p-10 rounded-[3rem] border border-slate-100 shadow-sm relative overflow-hidden">
-                <div className="absolute top-0 right-0 p-10 opacity-[0.03]">
-                    <Factory size={180} />
-                </div>
-                <div className="space-y-2 relative z-10">
-                    <h2 className="text-4xl font-black text-slate-900 tracking-tight leading-none uppercase">
-                        Production Review
-                    </h2>
-                    <p className="text-slate-500 font-medium">Clear the queue: Review proposals for the next 4 months.</p>
+            {/* Top Bar with Role Toggle */}
+            <div className="flex justify-between items-center bg-white p-6 rounded-[2rem] border border-slate-100 shadow-sm">
+                <div className="flex items-center gap-4">
+                    <div className="w-10 h-10 bg-blue-50 text-blue-600 rounded-xl flex items-center justify-center">
+                        <User size={20} />
+                    </div>
+                    <div>
+                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest leading-none mb-1">Current Session Role</p>
+                        <h4 className="text-sm font-black text-slate-900 uppercase">{role || 'GUEST'}</h4>
+                    </div>
                 </div>
 
-                <div className="flex gap-4 relative z-10 items-center">
-                    <div className="relative">
-                        <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
-                        <input
-                            type="text"
-                            placeholder="Filter by SKU or Supplier..."
-                            className="pl-11 pr-6 py-3.5 bg-slate-50 border border-slate-200 rounded-2xl text-[11px] font-bold outline-none focus:bg-white focus:border-[#003E7E] transition-all min-w-[280px]"
-                            value={searchTerm}
-                            onChange={(e) => setSearchTerm(e.target.value)}
-                        />
-                    </div>
-                    <button onClick={loadOrders} className="p-3.5 bg-white text-slate-600 border border-slate-200 rounded-2xl hover:bg-slate-50 transition-all">
-                        <RefreshCw size={18} className={loading ? "animate-spin" : ""} />
+                <div className="flex bg-slate-100 p-1 rounded-xl">
+                    <button
+                        onClick={() => setRole('OPS')}
+                        className={clsx("px-4 py-2 rounded-lg text-[10px] font-black uppercase tracking-tight transition-all",
+                            role === 'OPS' ? "bg-white text-blue-600 shadow-sm" : "text-slate-500 hover:text-slate-700")}
+                    >
+                        Ops Manager
                     </button>
-                    {selectedIds.length > 0 && (
-                        <button
-                            onClick={() => handleConfirm(selectedIds)}
-                            disabled={isProcessing}
-                            className="bg-emerald-600 text-white px-6 py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-emerald-500 shadow-xl flex items-center gap-2 animate-in zoom-in"
-                        >
-                            {isProcessing ? <Loader2 size={16} className="animate-spin" /> : <CheckCircle size={16} />}
-                            Confirm All ({selectedIds.length})
-                        </button>
-                    )}
+                    <button
+                        onClick={() => setRole('SUPPLIER')}
+                        className={clsx("px-4 py-2 rounded-lg text-[10px] font-black uppercase tracking-tight transition-all",
+                            role === 'SUPPLIER' ? "bg-white text-emerald-600 shadow-sm" : "text-slate-500 hover:text-slate-700")}
+                    >
+                        Supplier
+                    </button>
                 </div>
             </div>
 
-            {loading ? (
-                <div className="flex justify-center py-20">
-                    <div className="w-12 h-12 border-4 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
-                </div>
-            ) : Object.keys(groupedOrders).length === 0 ? (
-                <div className="bg-white rounded-[3rem] p-20 border-2 border-dashed border-slate-100 text-center">
-                    <div className="w-20 h-20 bg-slate-50 rounded-full flex items-center justify-center mx-auto mb-6">
-                        <CheckCircle className="text-emerald-500" size={40} />
+            {/* Sync Information Banner */}
+            {showSyncBanner && (
+                <div className="bg-gradient-to-r from-blue-500 to-indigo-600 rounded-[2rem] p-6 text-white shadow-xl flex items-center justify-between animate-in slide-in-from-top">
+                    <div className="flex items-center gap-4">
+                        <div className="w-12 h-12 bg-white/20 rounded-xl flex items-center justify-center backdrop-blur-sm">
+                            <RefreshCw size={24} className="animate-spin" />
+                        </div>
+                        <div>
+                            <h4 className="font-black text-sm uppercase tracking-wide">Syncing Data with Backend...</h4>
+                            <p className="text-white/80 text-xs font-medium mt-1">
+                                Orders are being updated in Google Sheets. Auto-refreshing data every few seconds.
+                                You can also click "Refresh Data" manually.
+                            </p>
+                        </div>
                     </div>
-                    <h3 className="text-2xl font-black text-slate-900">Queue Cleared To Zero</h3>
-                    <p className="text-slate-400 font-medium mt-2">No actionable proposals found in the current T+4 horizon.</p>
-                </div>
-            ) : (
-                <div className="space-y-12">
-                    {/* Select All Toggle */}
-                    {!loading && filteredOrders.length > 0 && (
-                        <div className="px-6 flex items-center gap-4">
-                            <button
-                                onClick={handleSelectAll}
-                                className="flex items-center gap-2 text-[10px] font-black uppercase tracking-widest text-[#003E7E] hover:underline"
-                            >
-                                {selectedIds.length === filteredOrders.length && selectedIds.length > 0 ? (
-                                    <><CheckSquare size={16} /> Deselect All</>
-                                ) : (
-                                    <><Square size={16} /> Select All Filtered Proposals</>
-                                )}
-                            </button>
-                            <span className="text-[10px] font-bold text-slate-400 bg-slate-100 px-3 py-1 rounded-full">
-                                {filteredOrders.length} items in current view
-                            </span>
-                        </div>
-                    )}
-
-                    {Object.entries(groupedOrders).map(([supplier, months]) => (
-                        <div key={supplier} className="space-y-6">
-                            <div className="flex items-center gap-4 px-4">
-                                <div className="w-10 h-10 bg-[#003E7E] rounded-xl flex items-center justify-center text-white font-black text-xs">
-                                    {supplier.substring(0, 2)}
-                                </div>
-                                <h3 className="text-2xl font-black text-slate-800 tracking-tight">{supplier}</h3>
-                                <div className="h-px flex-1 bg-slate-100 ml-4"></div>
-                            </div>
-
-                            {Object.entries(months).map(([month, rows]) => (
-                                <div key={month} className="space-y-4 pl-4 border-l-2 border-slate-50 ml-4">
-                                    <div className="flex items-center gap-2 mb-2">
-                                        <Calendar size={14} className="text-slate-400" />
-                                        <span className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">{month}</span>
-                                        <span className="ml-2 text-[9px] font-bold bg-slate-100 text-slate-500 px-2 py-0.5 rounded-full">
-                                            {rows.length} Items
-                                        </span>
-                                        <span className="ml-auto text-[10px] font-black text-[#003E7E]">
-                                            Total: ${rows.reduce((sum, r) => sum + parseFloat(r.Total_Value_USD || 0), 0).toLocaleString()}
-                                        </span>
-                                    </div>
-
-                                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                                        {rows.map((row) => {
-                                            const isSelected = selectedIds.includes(row.Plan_ID);
-                                            const isConflict = row.Change_Flag === "CONFLICT_DETECTED";
-                                            const isNew = row.Change_Flag === "ENTERED_HORIZON";
-                                            const isHighValue = parseFloat(row.Total_Value_USD || 0) > 50000;
-
-                                            return (
-                                                <div key={row.Plan_ID} className={clsx(
-                                                    "bg-white rounded-[2.5rem] p-8 border-2 transition-all group relative overflow-hidden",
-                                                    isSelected ? "border-[#003E7E] shadow-xl" : "border-slate-50 hover:border-slate-200 hover:shadow-lg"
-                                                )}>
-                                                    {/* Selection Toggle */}
-                                                    <button
-                                                        onClick={() => setSelectedIds(prev => isSelected ? prev.filter(id => id !== row.Plan_ID) : [...prev, row.Plan_ID])}
-                                                        className="absolute top-6 left-6 z-10"
-                                                    >
-                                                        {isSelected ? (
-                                                            <div className="bg-[#003E7E] text-white p-1 rounded-lg">
-                                                                <CheckSquare size={18} />
-                                                            </div>
-                                                        ) : (
-                                                            <div className="text-slate-200 hover:text-slate-400">
-                                                                <Square size={18} />
-                                                            </div>
-                                                        )}
-                                                    </button>
-
-                                                    <div className="flex flex-col h-full pl-8">
-                                                        <div className="flex items-start justify-between mb-4">
-                                                            <div>
-                                                                <h4 className="text-xl font-black text-slate-900 leading-none">{row.Product_Code}</h4>
-                                                                <p className="text-[9px] font-mono text-slate-400 mt-2 uppercase tracking-tighter">{row.Plan_ID}</p>
-                                                            </div>
-                                                            <div className="flex gap-2">
-                                                                {isConflict && <AlertTriangle size={18} className="text-rose-500 animate-pulse" title="CONFLICT_DETECTED" />}
-                                                                {isNew && <Layers size={18} className="text-blue-500" title="ENTERED_HORIZON" />}
-                                                                {isHighValue && <DollarSign size={18} className="text-emerald-500" title="High Value Order" />}
-                                                            </div>
-                                                        </div>
-
-                                                        <div className="space-y-4 flex-1">
-                                                            <div className="bg-slate-50 rounded-2xl p-4 flex items-center justify-between">
-                                                                <div>
-                                                                    <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest">Quantity</p>
-                                                                    <p className="text-lg font-black text-slate-900">Qty: {parseInt(row.Order_Quantity || 0).toLocaleString()}</p>
-                                                                </div>
-                                                                <div className="text-right">
-                                                                    <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest">Value</p>
-                                                                    <p className={clsx("text-sm font-black", isHighValue ? "text-emerald-600" : "text-slate-700")}>
-                                                                        ${parseFloat(row.Total_Value_USD || 0).toLocaleString()}
-                                                                    </p>
-                                                                </div>
-                                                            </div>
-
-                                                            <div className="flex items-center gap-2 text-[10px] font-bold text-slate-500">
-                                                                <Calendar size={12} /> Target: {row.Target_Date}
-                                                            </div>
-
-                                                            {isConflict && (
-                                                                <p className="text-[9px] font-bold text-rose-500 bg-rose-50 p-2 rounded-lg border border-rose-100 leading-tight">
-                                                                    Conflict: Previous booking differs from current algorithmic need. Manual review advised.
-                                                                </p>
-                                                            )}
-                                                            {isNew && (
-                                                                <p className="text-[9px] font-bold text-blue-500 bg-blue-50 p-2 rounded-lg border border-blue-100 leading-tight">
-                                                                    New: This order has just entered the T+4 actionable window.
-                                                                </p>
-                                                            )}
-                                                        </div>
-
-                                                        {/* Action Buttons */}
-                                                        <div className="flex gap-2 mt-6">
-                                                            <button
-                                                                onClick={() => handleConfirm([row.Plan_ID])}
-                                                                className="flex-1 bg-[#003E7E] text-white py-3 rounded-xl text-[9px] font-black uppercase tracking-widest hover:bg-blue-700 transition-all flex items-center justify-center gap-2"
-                                                            >
-                                                                <CheckCircle size={14} /> Confirm
-                                                            </button>
-                                                            <button
-                                                                onClick={() => { setEditItem(row); setNewQty(row.Order_Quantity); }}
-                                                                className="p-3 bg-slate-50 text-slate-400 hover:text-blue-600 rounded-xl transition-all"
-                                                                title="Edit Quantity"
-                                                            >
-                                                                <Edit3 size={16} />
-                                                            </button>
-                                                            <button
-                                                                onClick={() => handleReject(row.Plan_ID)}
-                                                                className="p-3 bg-slate-50 text-slate-400 hover:text-rose-500 rounded-xl transition-all"
-                                                                title="Reject / Cancel"
-                                                            >
-                                                                <Trash2 size={16} />
-                                                            </button>
-                                                        </div>
-                                                    </div>
-                                                </div>
-                                            );
-                                        })}
-                                    </div>
-                                </div>
-                            ))}
-                        </div>
-                    ))}
+                    <button
+                        onClick={() => setShowSyncBanner(false)}
+                        className="px-4 py-2 bg-white/20 hover:bg-white/30 rounded-xl text-xs font-black uppercase tracking-wide transition-all"
+                    >
+                        Dismiss
+                    </button>
                 </div>
             )}
 
-            {/* Edit Qty Modal */}
-            {editItem && (
-                <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[1000] flex items-center justify-center p-6 animate-in fade-in duration-200">
-                    <div className="bg-white rounded-[3rem] w-full max-w-md p-10 shadow-2xl relative">
-                        <button onClick={() => setEditItem(null)} className="absolute top-8 right-8 text-slate-400 hover:text-slate-600">
-                            <X size={24} />
+            {/* Header */}
+            <div className="bg-white p-10 rounded-[3rem] border border-slate-100 shadow-sm relative overflow-hidden">
+                <div className="absolute top-0 right-0 p-10 opacity-[0.03]">
+                    <Package size={180} />
+                </div>
+                <div className="space-y-2 relative z-10 flex justify-between items-end">
+                    <div>
+                        <h2 className="text-4xl font-black text-slate-900 tracking-tight leading-none uppercase">
+                            1.4 Production Hub
+                        </h2>
+                        <p className="text-slate-500 font-medium font-sans italic">Step 1.4.1 - 1.4.3: Working Order Management & EDI Transmission</p>
+                    </div>
+                    <div className="flex gap-4">
+                        <button
+                            onClick={() => loadData(false)}
+                            className="bg-slate-100 text-slate-600 px-6 py-4 rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-slate-200 transition-all active:scale-95 flex items-center gap-2 border border-slate-200"
+                        >
+                            <RefreshCw size={16} />
+                            Refresh Data
                         </button>
-                        <h3 className="text-2xl font-black text-slate-900 uppercase tracking-tight">Edit Proposal</h3>
-                        <p className="text-slate-500 font-medium mt-1">Adjust quantity for {editItem.Plan_ID}</p>
-
-                        <div className="mt-8 space-y-6">
-                            <div className="space-y-2">
-                                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">New Order Quantity</label>
-                                <input
-                                    type="number"
-                                    value={newQty}
-                                    onChange={(e) => setNewQty(parseInt(e.target.value))}
-                                    className="w-full bg-slate-50 border-2 border-slate-100 rounded-2xl px-6 py-4 font-black text-xl text-slate-900 outline-none focus:border-[#003E7E] transition-all"
-                                />
+                        {role === 'OPS' && (
+                            <button
+                                onClick={handleGenerateOrders}
+                                disabled={isProcessing}
+                                className="bg-blue-600 text-white px-8 py-4 rounded-2xl font-black text-xs uppercase tracking-widest shadow-xl hover:bg-blue-500 transition-all active:scale-95 disabled:opacity-50 flex items-center gap-2"
+                            >
+                                {isProcessing ? <Loader2 size={16} className="animate-spin" /> : <Zap size={16} />}
+                                Generate Proposals
+                            </button>
+                        )}
+                        <div className="px-6 py-4 bg-emerald-50 text-emerald-600 rounded-2xl border border-emerald-100 flex items-center gap-3">
+                            <div className="relative">
+                                <span className="absolute -top-1 -right-1 w-2 h-2 bg-emerald-500 rounded-full animate-pulse"></span>
+                                <Server size={20} />
                             </div>
-                            <div className="flex gap-4">
-                                <button onClick={() => setEditItem(null)} className="flex-1 py-4 font-black text-xs text-slate-400 uppercase">Cancel</button>
-                                <button onClick={handleEditSave} className="flex-[2] bg-[#003E7E] text-white py-4 rounded-2xl font-black text-xs uppercase tracking-widest shadow-xl shadow-blue-900/10 hover:bg-blue-700 transition-all">
-                                    Update Local State
-                                </button>
+                            <div className="flex flex-col">
+                                <span className="text-[10px] font-black uppercase tracking-widest opacity-60">
+                                    {lastRefresh ? `Last Sync: ${lastRefresh.toLocaleTimeString()}` : 'Status'}
+                                </span>
+                                <span className="text-xs font-black uppercase tracking-tight">n8n Connected</span>
                             </div>
                         </div>
                     </div>
+                </div>
+            </div>
+
+            {/* Next Step Card */}
+            {showNextStep && (
+                <div onClick={() => navigate('/inventory')} className="bg-slate-900 rounded-[3rem] p-10 text-white shadow-xl flex items-center justify-between group cursor-pointer animate-in slide-in-from-bottom hover:scale-[1.01] transition-all">
+                    <div className="flex items-center gap-8">
+                        <div className="w-20 h-20 bg-emerald-500 rounded-3xl flex items-center justify-center text-slate-900 shadow-lg shadow-emerald-500/20 group-hover:rotate-12 transition-all duration-300">
+                            <CheckSquare size={32} />
+                        </div>
+                        <div>
+                            <div className="flex items-center gap-3 mb-2">
+                                <span className="bg-emerald-500/20 text-emerald-400 px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest backdrop-blur-sm border border-emerald-500/20">
+                                    Step 1.4 Complete
+                                </span>
+                            </div>
+                            <h3 className="text-3xl font-black text-white tracking-tight group-hover:text-emerald-400 transition-colors">
+                                Production Confirmed
+                            </h3>
+                            <p className="text-slate-400 font-medium mt-1 group-hover:text-slate-300 transition-colors">
+                                595+ Orders moved to Manufacturing. Proceed to Inventory tracking.
+                            </p>
+                        </div>
+                    </div>
+                    <div className="w-16 h-16 bg-white/5 rounded-2xl flex items-center justify-center group-hover:bg-emerald-500 group-hover:text-slate-900 transition-all duration-300">
+                        <ChevronRight size={32} />
+                    </div>
+                </div>
+            )}
+
+            {/* Working Orders Ledger */}
+            {isSimulating ? (
+                <div className="bg-white rounded-[3.5rem] border border-slate-100 shadow-xl p-20 flex flex-col items-center justify-center text-center animate-in fade-in">
+                    <div className="relative mb-8">
+                        <div className="absolute inset-0 bg-indigo-500 blur-3xl opacity-20 animate-pulse rounded-full"></div>
+                        <Sparkles size={80} className="text-indigo-600 animate-spin-slow relative z-10" />
+                    </div>
+                    <h3 className="text-3xl font-black text-slate-900 mb-2">Simulating Supplier Inputs...</h3>
+                    <p className="text-slate-500 font-medium max-w-md mx-auto mb-8">
+                        The n8n Orchestrator is generating random FRI dates and Qtys for all pending proposals and confirming them in the Group PSS.
+                    </p>
+                    <div className="w-64 h-2 bg-slate-100 rounded-full overflow-hidden">
+                        <div className="h-full bg-indigo-600 animate-progress w-full origin-left"></div>
+                    </div>
+                </div>
+            ) : (
+                <div className="bg-white rounded-[3.5rem] border border-slate-100 shadow-xl overflow-hidden flex flex-col">
+                    <div className="p-10 border-b border-slate-50 flex items-center justify-between">
+                        <div className="flex items-center gap-6">
+                            <div className="w-12 h-12 bg-indigo-50 text-indigo-600 rounded-2xl flex items-center justify-center">
+                                <Database size={24} />
+                            </div>
+                            <div className="space-y-1">
+                                <h4 className="text-2xl font-black text-slate-900 uppercase tracking-tight">Working Orders Ledger</h4>
+                                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Consolidated Order Proposals (Status: PROPOSAL)</p>
+                            </div>
+                        </div>
+                        {role === 'OPS' && (
+                            <button
+                                onClick={handleBulkSimulation}
+                                className="bg-indigo-600 text-white px-6 py-3 rounded-2xl font-black text-[10px] uppercase tracking-widest shadow-lg hover:bg-indigo-500 transition-all active:scale-95 flex items-center gap-2 animate-in slide-in-from-right"
+                            >
+                                <Sparkles size={14} /> Auto-Fill Proposals (Simulation)
+                            </button>
+                        )}
+                        {role === 'SUPPLIER' && (
+                            <button
+                                onClick={handleBulkSimulation}
+                                className="bg-emerald-600 text-white px-6 py-3 rounded-2xl font-black text-[10px] uppercase tracking-widest shadow-lg hover:bg-emerald-500 transition-all active:scale-95 flex items-center gap-2 animate-in slide-in-from-right"
+                            >
+                                <CheckSquare size={14} /> Batch Confirm All Proposals
+                            </button>
+                        )}
+                    </div>
+
+                    <div className="table-container sticky-header">
+                        <table className="w-full text-left whitespace-nowrap">
+                            <thead>
+                                <tr className="bg-slate-50/50">
+                                    <th className="p-8 text-[10px] font-black text-slate-400 uppercase tracking-widest">Plan ID</th>
+                                    {role === 'OPS' && (
+                                        <>
+                                            <th className="p-8 text-[10px] font-black text-slate-400 uppercase tracking-widest">Client</th>
+                                            <th className="p-8 text-[10px] font-black text-slate-400 uppercase tracking-widest">POD</th>
+                                        </>
+                                    )}
+                                    <th className="p-8 text-[10px] font-black text-slate-400 uppercase tracking-widest">Product</th>
+                                    <th className="p-8 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">Proposed Qty</th>
+                                    <th className="p-8 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">Trigger Qty</th>
+                                    <th className="p-8 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">FRI Date</th>
+                                    {role === 'OPS' && <th className="p-8 text-[10px] font-black text-slate-400 uppercase tracking-widest text-right">Pricing</th>}
+                                    <th className="p-8 text-[10px] font-black text-slate-400 uppercase tracking-widest text-right pr-10">Action</th>
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-50">
+                                {orders.filter(o => ['PROPOSAL', 'PENDING_APPROVAL', 'CONFIRMED_RPO'].includes(o.status)).map((row, idx) => {
+                                    const isConfirmed = row.status === 'CONFIRMED_RPO';
+                                    return (
+                                        <tr key={idx} className={clsx("hover:bg-slate-50/50 transition-all", isConfirmed && "bg-emerald-50/30")}>
+                                            <td className="p-8 font-black text-slate-900 text-sm">
+                                                {row.planId}
+                                                {isConfirmed && <span className="ml-2 px-2 py-0.5 bg-emerald-500 text-white text-[8px] rounded font-black tracking-widest uppercase align-middle">Confirmed</span>}
+                                            </td>
+                                            {role === 'OPS' && (
+                                                <>
+                                                    <td className="p-8 text-xs font-bold text-slate-500">{row.client}</td>
+                                                    <td className="p-8 text-xs font-bold text-slate-500">{row.pod}</td>
+                                                </>
+                                            )}
+                                            <td className="p-8">
+                                                <p className="font-black text-blue-600 text-sm">{row.productCode}</p>
+                                            </td>
+                                            <td className="p-8 text-center text-sm font-bold text-slate-400 italic">{row.proposedQty}</td>
+                                            <td className="p-8 text-center">
+                                                {role === 'SUPPLIER' && !isConfirmed ? (
+                                                    <div className="relative group">
+                                                        <div className="absolute -top-6 left-1/2 -translate-x-1/2 bg-slate-800 text-white text-[9px] px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap z-10">
+                                                            Supplier Input Required
+                                                        </div>
+                                                        {(() => {
+                                                            const proposedQty = parseInt(row.proposedQty);
+                                                            const triggerQty = parseInt(row.triggerQty);
+                                                            const isOverProduction = triggerQty > proposedQty * 1.20;
+                                                            return (
+                                                                <div className="relative inline-flex items-center gap-1">
+                                                                    <input
+                                                                        type="number"
+                                                                        value={row.triggerQty}
+                                                                        onChange={(e) => handleInputChange(row.planId, 'triggerQty', e.target.value)}
+                                                                        className={clsx(
+                                                                            "w-24 bg-white border rounded-lg px-2 py-1 text-xs font-black text-center focus:ring-2 focus:ring-blue-500 outline-none shadow-sm",
+                                                                            isOverProduction ? "border-amber-500 ring-2 ring-amber-200" : "border-slate-200 ring-1 ring-amber-200"
+                                                                        )}
+                                                                    />
+                                                                    {isOverProduction && (
+                                                                        <AlertCircle size={14} className="text-amber-500 absolute -right-5" />
+                                                                    )}
+                                                                </div>
+                                                            );
+                                                        })()}
+                                                    </div>
+                                                ) : (
+                                                    <span className="font-black text-slate-900">{row.triggerQty}</span>
+                                                )}
+                                            </td>
+                                            <td className="p-8 text-center">
+                                                {role === 'SUPPLIER' && !isConfirmed ? (
+                                                    <div className="relative group">
+                                                        <div className={clsx(
+                                                            "absolute -top-6 left-1/2 -translate-x-1/2 text-white text-[9px] px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap z-10",
+                                                            !row.friDate ? "bg-rose-600" : "bg-slate-800"
+                                                        )}>
+                                                            {!row.friDate ? "⚠️ Required Field" : "Factory Ready Inspection Date"}
+                                                        </div>
+                                                        <input
+                                                            type="date"
+                                                            value={row.friDate}
+                                                            onChange={(e) => handleInputChange(row.planId, 'friDate', e.target.value)}
+                                                            className={clsx(
+                                                                "bg-white border rounded-lg px-2 py-1 text-xs font-black focus:ring-2 focus:ring-blue-500 outline-none shadow-sm",
+                                                                !row.friDate ? "border-rose-500 ring-2 ring-rose-200" : "border-slate-200 ring-1 ring-amber-200"
+                                                            )}
+                                                            required
+                                                        />
+                                                    </div>
+                                                ) : (
+                                                    <span className="font-bold text-slate-600">{row.friDate}</span>
+                                                )}
+                                            </td>
+                                            {role === 'OPS' && <td className="p-8 text-right font-bold text-slate-600">${row.price?.toFixed(2)}</td>}
+                                            <td className="p-8 text-right pr-10">
+                                                {role === 'SUPPLIER' && !isConfirmed ? (
+                                                    <button
+                                                        onClick={() => handleConfirmOrder(row)}
+                                                        disabled={isProcessing}
+                                                        className="bg-emerald-600 text-white px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-emerald-500 transition-all flex items-center gap-2 ml-auto shadow-lg shadow-emerald-200/50 hover:-translate-y-0.5"
+                                                    >
+                                                        Confirm Order
+                                                    </button>
+                                                ) : isConfirmed ? (
+                                                    <span className="text-emerald-600"><CheckCircle size={20} className="ml-auto" /></span>
+                                                ) : (
+                                                    <a href="#" onClick={(e) => { e.preventDefault(); setRole("SUPPLIER"); }} className="text-amber-500 hover:text-amber-600 text-[9px] font-black uppercase tracking-widest border-b border-dashed border-amber-300">
+                                                        Wait for Supplier
+                                                    </a>
+                                                )}
+                                            </td>
+                                        </tr>
+                                    );
+                                })}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            )}
+
+            {/* Integration Logs Console (OPS ONLY) */}
+            {role === 'OPS' && (
+                <div className="space-y-6">
+                    <button
+                        onClick={() => setShowLogs(!showLogs)}
+                        className="flex items-center gap-3 text-slate-500 hover:text-slate-900 transition-all"
+                    >
+                        <Terminal size={18} />
+                        <span className="text-xs font-black uppercase tracking-widest">Integration Log Console (EDI 850 Status)</span>
+                        {showLogs ? <EyeOff size={14} /> : <Eye size={14} />}
+                    </button>
+
+                    {showLogs && (
+                        <div className="bg-slate-900 rounded-[2.5rem] p-8 text-emerald-400 font-mono text-xs shadow-2xl animate-in slide-in-from-bottom border border-slate-800">
+                            <div className="flex items-center gap-2 mb-4 border-b border-slate-800 pb-4 opacity-50">
+                                <div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse" />
+                                <span className="uppercase tracking-[0.2em] font-black text-[10px]">Connected to PSS Integration Engine v2.4</span>
+                            </div>
+                            <div className="space-y-2 max-h-[300px] overflow-auto custom-scrollbar">
+                                {logs.map((log, i) => (
+                                    <div key={i} className="flex gap-4 group">
+                                        <span className="text-slate-600 opacity-50">[{log.timestamp}]</span>
+                                        <span className="text-blue-400 font-bold min-w-[80px]">{log.type}</span>
+                                        <span className="text-slate-400">REF: {log.reference}</span>
+                                        <span className={clsx("font-black uppercase tracking-widest ml-auto",
+                                            log.status === 'SENT' ? "text-emerald-500" : "text-rose-500")}>
+                                            {log.status}
+                                        </span>
+                                        <span className="text-slate-500 italic group-hover:text-slate-300 transition-colors">— {log.message}</span>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    )}
                 </div>
             )}
         </div>
     );
 };
 
-export default ProductionReview;
+export default Production;

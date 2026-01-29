@@ -5,6 +5,15 @@ const AuthContext = createContext();
 export const AuthProvider = ({ children }) => {
     const [user, setUser] = useState(null);
     const [role, setRole] = useState(localStorage.getItem('orion_role') || null);
+    const [season, setSeason] = useState(localStorage.getItem('orion_season') || 'S26');
+    const [collectionId, setCollectionId] = useState(localStorage.getItem('orion_collection_id') || 'HP124');
+
+    const setCollectionContext = (s, c) => {
+        setSeason(s);
+        setCollectionId(c);
+        localStorage.setItem('orion_season', s);
+        localStorage.setItem('orion_collection_id', c);
+    };
 
     const login = (selectedRole) => {
         setRole(selectedRole);
@@ -38,7 +47,7 @@ export const AuthProvider = ({ children }) => {
     }, [role]);
 
     return (
-        <AuthContext.Provider value={{ user, role, login, logout, toggleRole }}>
+        <AuthContext.Provider value={{ user, role, setRole: login, login, logout, toggleRole, season, collectionId, setCollectionContext }}>
             {children}
         </AuthContext.Provider>
     );

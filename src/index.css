@@ -4,7 +4,7 @@
   --color-brand-blue: #003E7E;
   --color-brand-light: #F4F7FA;
   --color-brand-gray: #6B7280;
-  
+
   --font-sans: 'Inter', system-ui, -apple-system, sans-serif;
 }
 
@@ -38,18 +38,59 @@ body {
   @apply px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider;
 }
 
-.status-proposal { @apply bg-blue-100 text-blue-700; }
-.status-confirmed { @apply bg-green-100 text-green-700; }
-.status-shipped { @apply bg-purple-100 text-purple-700; }
-.status-action { @apply bg-red-100 text-red-700; }
-.status-negotiation { @apply bg-yellow-100 text-yellow-700; }
-.status-booked { @apply bg-teal-100 text-teal-700; }
+.status-proposal {
+  @apply bg-blue-100 text-blue-700;
+}
+
+.status-confirmed {
+  @apply bg-green-100 text-green-700;
+}
+
+.status-shipped {
+  @apply bg-purple-100 text-purple-700;
+}
+
+.status-action {
+  @apply bg-red-100 text-red-700;
+}
+
+.status-negotiation {
+  @apply bg-yellow-100 text-yellow-700;
+}
+
+.status-booked {
+  @apply bg-teal-100 text-teal-700;
+}
+
 @layer utilities {
-    .no-scrollbar::-webkit-scrollbar {
-        display: none;
-    }
-    .no-scrollbar {
-        -ms-overflow-style: none;
-        scrollbar-width: none;
-    }
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+
+  .no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+
+  /* Premium Thin Scrollbar */
+  .custom-scrollbar::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+
+  .custom-scrollbar::-webkit-scrollbar-track {
+    @apply bg-slate-50 rounded-full;
+  }
+
+  .custom-scrollbar::-webkit-scrollbar-thumb {
+    @apply bg-slate-200 rounded-full hover:bg-slate-300 transition-colors;
+  }
+
+  .table-container {
+    @apply max-h-[600px] overflow-auto relative;
+  }
+
+  .sticky-header thead {
+    @apply sticky top-0 z-20 bg-white shadow-sm;
+  }
 }

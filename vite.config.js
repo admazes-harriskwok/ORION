@@ -8,12 +8,12 @@ export default defineConfig({
   server: {
     proxy: {
       '/api-proxy': {
-        target: 'https://n8n-test.admazes.com/webhook',
+        target: 'https://n8n-556899434834.us-central1.run.app/webhook',
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/api-proxy/, '')
       },
       '/api-test-proxy': {
-        target: 'https://n8n-test.admazes.com/webhook-test',
+        target: 'https://n8n-556899434834.us-central1.run.app/webhook-test',
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/api-test-proxy/, '')
       }

@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
-import { Package, Truck, Calendar, ChevronDown, ChevronUp, CheckCircle, AlertTriangle, Clock } from 'lucide-react';
+import { Package, Truck, Calendar, ChevronDown, ChevronUp, CheckCircle, AlertTriangle, Clock, Square, CheckSquare } from 'lucide-react';
 
-const ShipmentCard = ({ shipment, onValidate, onSimulateDelay }) => {
+const ShipmentCard = ({ shipment, onValidate, onSimulateDelay, isSelectable, isSelected, onToggleSelect }) => {
     const [expanded, setExpanded] = useState(false);
     const [loading, setLoading] = useState(false);
 
@@ -54,23 +54,35 @@ const ShipmentCard = ({ shipment, onValidate, onSimulateDelay }) => {
             {/* HEADER */}
             <div className="p-5">
                 <div className="flex justify-between items-start mb-4">
-                    <div>
-                        <div className="flex items-center gap-3 mb-1">
-                            <span className="font-bold text-lg text-slate-800">{shipment.Shipment_ID}</span>
+                    <div className="flex items-start gap-3">
+                        {/* Selection Checkbox */}
+                        {isSelectable && (
+                            <button
+                                onClick={onToggleSelect}
+                                className="mt-1 text-slate-400 hover:text-[#003E7E] transition-colors"
+                            >
+                                {isSelected ? <CheckSquare size={20} className="text-[#003E7E]" /> : <Square size={20} />}
+                            </button>
+                        )}
 
-                            {/* Status Badge */}
-                            <span className={`px-2 py-0.5 rounded-full text-xs font-semibold border ${getStatusColor(shipment.Status)}`}>
-                                {shipment.Status.replace(/_/g, ' ')}
-                            </span>
+                        <div>
+                            <div className="flex items-center gap-3 mb-1">
+                                <span className="font-bold text-lg text-slate-800">{shipment.Shipment_ID}</span>
 
-                            {/* Risk Badge (New) */}
-                            {getRiskBadge(shipment.Risk_Level, shipment.Delay_Days)}
-                        </div>
+                                {/* Status Badge */}
+                                <span className={`px-2 py-0.5 rounded-full text-xs font-semibold border ${getStatusColor(shipment.Status)}`}>
+                                    {shipment.Status.replace(/_/g, ' ')}
+                                </span>
 
-                        <div className="text-sm text-slate-500 flex items-center gap-2">
-                            <span className="font-medium text-slate-700">{shipment.Supplier_Code}</span>
-                            <span>•</span>
-                            <span>{shipment.Sourcing_Office || 'HK'} Office</span>
+                                {/* Risk Badge (New) */}
+                                {getRiskBadge(shipment.Risk_Level, shipment.Delay_Days)}
+                            </div>
+
+                            <div className="text-sm text-slate-500 flex items-center gap-2">
+                                <span className="font-medium text-slate-700">{shipment.Supplier_Code}</span>
+                                <span>•</span>
+                                <span>{shipment.Sourcing_Office || 'HK'} Office</span>
+                            </div>
                         </div>
                     </div>
 
