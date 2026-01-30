@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { Settings, RefreshCw, CheckCircle, AlertCircle, Loader2, UserPlus, FileText, Database, Layers, CheckSquare, Square, Zap, ChevronRight, XCircle } from 'lucide-react';
+import { Settings, RefreshCw, CheckCircle, AlertCircle, Loader2, UserPlus, FileText, Database, Layers, CheckSquare, Square, Zap, ChevronRight, XCircle, Cloud } from 'lucide-react';
 import { clsx } from 'clsx';
-import { syncProductMaster, fetchPlmStaging } from '../utils/api';
+import { syncProductMaster, fetchPlmStaging, runGlobalSync } from '../utils/api';
 import { useAuth } from '../context/AuthContext';
 import { useNavigate } from 'react-router-dom';
 
@@ -9,6 +9,7 @@ const Config = () => {
     const { season, collectionId, setCollectionContext } = useAuth();
     const navigate = useNavigate();
     const [isSyncing, setIsSyncing] = useState(false);
+    const [isGlobalSyncing, setIsGlobalSyncing] = useState(false);
     const [isLoadingData, setIsLoadingData] = useState(false);
     const [isSynced, setIsSynced] = useState(localStorage.getItem('prereq_masterDataSynced') === 'true');
 
@@ -92,6 +93,33 @@ const Config = () => {
             alert("Sync failed: " + err.message);
         } finally {
             setIsSyncing(false);
+        }
+    };
+
+    const handleGlobalSync = async () => {
+        const okBuyerItems = offerSheetData.filter(item => item.status === 'OKBUYER');
+        if (okBuyerItems.length === 0) {
+            alert("No 'OKBUYER' items detected in staging. Please validate terms in Step 0.0.2 first.");
+            return;
+        }
+
+        setIsGlobalSyncing(true);
+        try {
+            await runGlobalSync({
+                season: season,
+                collectionId: collectionId,
+                products: okBuyerItems
+            });
+            alert("✅ Global Data Sync Initiated: Ingesting OKBUYER items to Product Master...");
+            setTimeout(() => {
+                alert("✅ Global Sync Complete. Product Master Ledger updated and generated.");
+                setIsGlobalSyncing(false);
+                setIsSynced(true);
+                localStorage.setItem('prereq_masterDataSynced', 'true');
+            }, 2000);
+        } catch (err) {
+            alert("❌ Global Sync Failed: " + err.message);
+            setIsGlobalSyncing(false);
         }
     };
 
@@ -266,45 +294,81 @@ const Config = () => {
                             <Zap size={120} />
                         </div>
                         <h5 className="font-black text-xs uppercase tracking-[0.3em] mb-8 text-blue-400">Step 0.0.5: Global Sync</h5>
+
                         <div className="space-y-6 relative z-10 h-full flex flex-col">
-                            <div className="space-y-2">
+                            {/* System Status Badges */}
+                            <div className="space-y-3">
+                                <div className="flex items-center gap-3 px-4 py-3 bg-white/5 border border-white/10 rounded-2xl">
+                                    <Cloud size={16} className="text-emerald-400 animate-pulse" />
+                                    <div className="flex-1">
+                                        <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">External PLM</p>
+                                        <p className="text-xs font-bold text-white">SYSTEM ONLINE</p>
+                                    </div>
+                                </div>
+                                <div className="flex items-center gap-3 px-4 py-3 bg-white/5 border border-white/10 rounded-2xl">
+                                    <Database size={16} className="text-blue-400" />
+                                    <div className="flex-1">
+                                        <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Internal ERP</p>
+                                        <p className="text-xs font-bold text-white">SYNC STANDBY</p>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div className="space-y-2 pt-4">
                                 <p className="text-3xl font-black tracking-tighter">Automatic Ingest</p>
                                 <p className="text-slate-400 text-xs font-medium leading-relaxed">
-                                    Synced <b>{offerSheetData.filter(i => i.status === 'OKBUYER').length}</b> items to {season}/{collectionId}
+                                    Ready to ingest validated <b>OKBUYER</b> items from PLM into Product Master.
                                 </p>
                             </div>
 
-                            <button
-                                onClick={handleSync}
-                                disabled={isSyncing || isSynced}
-                                className={clsx(
-                                    "w-full py-5 rounded-2xl font-black text-xs uppercase tracking-widest transition-all active:scale-95 flex items-center justify-center gap-3 mt-4",
-                                    isSynced
-                                        ? "bg-emerald-500 text-white shadow-emerald-900/20"
-                                        : "bg-blue-600 text-white shadow-xl hover:bg-blue-500 shadow-blue-900/20"
+                            <div className="flex gap-4 mt-4">
+                                <button
+                                    onClick={handleGlobalSync}
+                                    disabled={isGlobalSyncing || isSynced}
+                                    className={clsx(
+                                        "flex-1 py-5 rounded-2xl font-black text-xs uppercase tracking-widest transition-all active:scale-95 flex items-center justify-center gap-3",
+                                        isSynced
+                                            ? "bg-emerald-500 text-white shadow-emerald-900/20"
+                                            : "bg-blue-600 text-white shadow-xl hover:bg-blue-500 shadow-blue-900/20"
+                                    )}
+                                >
+                                    {isGlobalSyncing ? <Loader2 size={18} className="animate-spin" /> : (isSynced ? <CheckCircle size={18} /> : <RefreshCw size={18} />)}
+                                    {isSynced ? 'Product Master Synced' : 'Execute Global Sync'}
+                                </button>
+
+                                {isSynced && (
+                                    <button
+                                        onClick={() => {
+                                            if (confirm("RETRY SYNC: This will reset the sync flag. Re-sync now?")) {
+                                                localStorage.removeItem('prereq_masterDataSynced');
+                                                setIsSynced(false);
+                                            }
+                                        }}
+                                        className="p-5 rounded-2xl bg-white/5 text-white/50 hover:bg-white/10 hover:text-white transition-all border border-white/5"
+                                        title="Retry Global Sync"
+                                    >
+                                        <RefreshCw size={18} />
+                                    </button>
                                 )}
-                            >
-                                {isSyncing ? <Loader2 size={18} className="animate-spin" /> : (isSynced ? <CheckCircle size={18} /> : <RefreshCw size={18} />)}
-                                {isSynced ? 'Product Master Synced' : 'Sync OKBUYER Data'}
-                            </button>
+                            </div>
 
                             {isSynced && (
                                 <button
                                     onClick={() => navigate('/assortment')}
-                                    className="w-full py-5 rounded-2xl bg-white/10 text-white font-black text-[10px] uppercase tracking-[0.2em] mt-4 hover:bg-white/20 transition-all flex items-center justify-center gap-2 border border-white/5"
+                                    className="w-full py-5 rounded-2xl bg-white/10 text-white font-black text-[10px] uppercase tracking-[0.2em] mt-2 hover:bg-white/20 transition-all flex items-center justify-center gap-2 border border-white/5"
                                 >
-                                    Go to Assortment <ChevronRight size={14} />
+                                    Proceed to Assortment <ChevronRight size={14} />
                                 </button>
                             )}
 
                             <div className="flex-1 flex flex-col justify-end mt-10">
-                                <div className="p-6 bg-white/5 rounded-3xl border border-white/10 space-y-3">
+                                <div className="p-6 bg-white/5 rounded-3xl border border-white/10 space-y-2">
                                     <div className="flex items-center justify-between text-[10px] font-black uppercase tracking-widest">
-                                        <span className="text-slate-500">Validation Filter</span>
-                                        <span className="text-emerald-400">ACTIVE</span>
+                                        <span className="text-slate-500">Security Protocol</span>
+                                        <span className="text-blue-400">AES-256</span>
                                     </div>
                                     <p className="text-[10px] text-slate-400 leading-relaxed font-medium italic">
-                                        *Only items with 'OKBUYER' status will be ingested into the internal Product_Master database.
+                                        *Automatic ingestion bypasses manual 1.1 initialization for active collections.
                                     </p>
                                 </div>
                             </div>

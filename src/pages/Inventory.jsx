@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Database, Activity, RefreshCw, AlertTriangle, CheckCircle, Package, TrendingUp, Search, BarChart3, Scan, ShieldAlert, Loader2, Calendar, ShieldCheck, Edit3, ArrowRight, Truck } from 'lucide-react';
+import { Database, Activity, RefreshCw, AlertTriangle, CheckCircle, Package, TrendingUp, Search, BarChart3, Scan, ShieldAlert, Loader2, Calendar, ShieldCheck, Edit3, ArrowRight, Truck, MessageSquare } from 'lucide-react';
 import { clsx } from 'clsx';
 import { fetchInventory, calculateOrders } from '../utils/api';
 import { useAuth } from '../context/AuthContext';
+import CollaborationChat from '../components/CollaborationChat';
 
 const Inventory = () => {
     const { role, setRole } = useAuth();
@@ -16,6 +17,9 @@ const Inventory = () => {
     const [showNextStep, setShowNextStep] = useState(false);
     const [selectedProduct, setSelectedProduct] = useState(null);
     const [adjData, setAdjData] = useState({ wip: 0, okqc: 0, comment: '' });
+
+    // Chat State
+    const [chatConfig, setChatConfig] = useState({ isOpen: false, id: null });
 
     const loadData = async () => {
         setLoading(true);
@@ -181,8 +185,8 @@ const Inventory = () => {
                             <Activity size={24} />
                         </div>
                         <div className="space-y-1">
-                            <h4 className="text-2xl font-black text-slate-900 uppercase tracking-tight">Live Stock Health</h4>
-                            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Real-time status of WIP vs Released Stock</p>
+                            <h4 className="text-2xl font-black text-slate-900 uppercase tracking-tight">Inventory</h4>
+                            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Global Stock Control Control (WIP & OKQC)</p>
                         </div>
                     </div>
                 </div>
@@ -254,12 +258,12 @@ const Inventory = () => {
                                                     <Edit3 size={20} />
                                                 </button>
                                             ) : (
-                                                <a
-                                                    href={`mailto:ops@carrefour.com?subject=Discrepancy Report: ${row.productCode}&body=System shows OKQC: ${row.okqcQty}. Floor stock is: [ENTER ACTUAL QTY].`}
-                                                    className="inline-flex items-center gap-2 px-4 py-2 bg-rose-50 text-rose-600 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-rose-100 transition-all border border-rose-100"
+                                                <button
+                                                    onClick={() => setChatConfig({ isOpen: true, id: row.productCode })}
+                                                    className="inline-flex items-center gap-2 px-4 py-2 bg-blue-50 text-blue-600 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-blue-600 hover:text-white transition-all border border-blue-100 shadow-sm"
                                                 >
-                                                    <AlertTriangle size={14} /> Raise Discrepancy
-                                                </a>
+                                                    <MessageSquare size={14} /> Resolve Discrepancy
+                                                </button>
                                             )}
                                         </td>
                                     </tr>
@@ -341,6 +345,13 @@ const Inventory = () => {
                     </div>
                 </div>
             )}
+            {/* Chat Sidebar */}
+            <CollaborationChat
+                isOpen={chatConfig.isOpen}
+                onClose={() => setChatConfig({ ...chatConfig, isOpen: false })}
+                contextId={chatConfig.id}
+                contextType="INVENTORY"
+            />
         </div>
     );
 };

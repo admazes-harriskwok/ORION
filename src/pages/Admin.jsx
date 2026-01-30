@@ -1,6 +1,5 @@
 import React, { useState } from 'react';
 import {
-    Settings,
     Users,
     UserPlus,
     Shield,
@@ -10,7 +9,6 @@ import {
     SlidersHorizontal,
     Search,
     ChevronRight,
-    Lock,
     Unlock
 } from 'lucide-react';
 import { clsx } from 'clsx';
@@ -66,6 +64,13 @@ const Admin = () => {
                         icon={Database}
                         label="Audit Ledger"
                     />
+                    <MenuButton
+                        active={activeTab === 'reset'}
+                        onClick={() => setActiveTab('reset')}
+                        icon={Unlock}
+                        label="Reset Demo"
+                        className="!bg-red-50 !text-red-600 border border-red-100/50 hover:!bg-red-100"
+                    />
 
                     <div className="mt-12 bg-blue-50/50 rounded-[2.5rem] p-8 space-y-4 border border-blue-100/50">
                         <div className="flex items-center gap-3 text-blue-600">
@@ -83,66 +88,100 @@ const Admin = () => {
                     <div className="bg-white rounded-[3.5rem] border border-slate-100 shadow-xl overflow-hidden min-h-[600px]">
                         <div className="p-10 border-b border-slate-50 flex items-center justify-between">
                             <h4 className="text-2xl font-black text-slate-900 uppercase tracking-tight">
-                                {activeTab === 'users' ? 'Registered Access Nodes' : 'System Configuration'}
+                                {activeTab === 'users' ? 'Registered Access Nodes' :
+                                    activeTab === 'reset' ? 'Danger Zone: Reset Demo' : 'System Configuration'}
                             </h4>
-                            <div className="relative">
-                                <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300" size={16} />
-                                <input
-                                    type="text"
-                                    placeholder="Filter..."
-                                    className="pl-10 pr-6 py-2 bg-slate-50 border-none rounded-xl text-xs font-bold outline-none"
-                                />
-                            </div>
+                            {activeTab !== 'reset' && (
+                                <div className="relative">
+                                    <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300" size={16} />
+                                    <input
+                                        type="text"
+                                        placeholder="Filter..."
+                                        className="pl-10 pr-6 py-2 bg-slate-50 border-none rounded-xl text-xs font-bold outline-none"
+                                    />
+                                </div>
+                            )}
                         </div>
 
-                        <div className="table-container sticky-header">
-                            <table className="w-full text-left">
-                                <thead>
-                                    <tr className="bg-slate-50/50">
-                                        <th className="p-8 text-[10px] font-black text-slate-400 uppercase tracking-widest">Descriptor</th>
-                                        <th className="p-8 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">Protocol Role</th>
-                                        <th className="p-8 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">Status</th>
-                                        <th className="p-8 text-[10px] font-black text-slate-400 uppercase tracking-widest text-right">Actions</th>
-                                    </tr>
-                                </thead>
-                                <tbody className="divide-y divide-slate-50">
-                                    {users.map((user, idx) => (
-                                        <tr key={idx} className="hover:bg-blue-50/20 transition-all group">
-                                            <td className="p-8">
-                                                <div className="flex items-center gap-6">
-                                                    <div className="w-12 h-12 bg-slate-100 rounded-2xl flex items-center justify-center text-slate-400 group-hover:bg-white group-hover:shadow-md transition-all">
-                                                        <Key size={20} />
-                                                    </div>
-                                                    <div>
-                                                        <p className="font-black text-slate-900 leading-none">{user.name}</p>
-                                                        <p className="text-xs font-medium text-slate-400 mt-2">{user.email}</p>
-                                                    </div>
-                                                </div>
-                                            </td>
-                                            <td className="p-8 text-center">
-                                                <span className={clsx(
-                                                    "px-4 py-1 rounded-full text-[10px] font-black uppercase tracking-widest",
-                                                    user.role === 'OPS' ? "bg-blue-900 text-white" : "bg-slate-100 text-slate-500"
-                                                )}>
-                                                    {user.role}
-                                                </span>
-                                            </td>
-                                            <td className="p-8 text-center text-xs font-bold text-emerald-600">
-                                                <div className="flex items-center justify-center gap-2">
-                                                    <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]"></div>
-                                                    {user.status}
-                                                </div>
-                                            </td>
-                                            <td className="p-8 text-right">
-                                                <button className="p-2 text-slate-300 hover:text-slate-900 transition-all">
-                                                    <ChevronRight size={20} />
-                                                </button>
-                                            </td>
+                        {activeTab === 'reset' ? (
+                            <div className="p-20 flex flex-col items-center text-center space-y-8">
+                                <div className="w-24 h-24 bg-red-50 text-red-500 rounded-3xl flex items-center justify-center animate-pulse">
+                                    <Shield size={48} />
+                                </div>
+                                <div className="space-y-4 max-w-lg">
+                                    <h3 className="text-3xl font-black text-slate-900 uppercase">Warning: Irreversible Action</h3>
+                                    <p className="text-slate-500 font-medium leading-relaxed">
+                                        This action will wipe all transaction data, including product registrations, supply plans, production orders, and shipments. <br /><br />
+                                        The system will revert to its initial empty state for a fresh demo run.
+                                    </p>
+                                </div>
+                                <button
+                                    onClick={async () => {
+                                        if (!window.confirm("WARNING: This will delete all demo data. Continue?")) return;
+                                        try {
+                                            await fetch('https://n8n-test.admazes.com/webhook/reset-demo-data', { method: 'POST' });
+                                            alert("System Reset Complete. Ready for Demo.");
+                                            window.location.reload();
+                                        } catch (error) {
+                                            console.error("Reset failed", error);
+                                            alert("Reset failed: " + error.message);
+                                        }
+                                    }}
+                                    className="bg-red-600 text-white px-12 py-5 rounded-2xl font-black text-sm uppercase tracking-widest shadow-xl shadow-red-200 hover:bg-red-700 hover:scale-105 transition-all active:scale-95 flex items-center gap-3"
+                                >
+                                    <Unlock size={18} /> CONFIRM SYSTEM RESET
+                                </button>
+                            </div>
+                        ) : (
+                            <div className="table-container sticky-header">
+                                <table className="w-full text-left">
+                                    <thead>
+                                        <tr className="bg-slate-50/50">
+                                            <th className="p-8 text-[10px] font-black text-slate-400 uppercase tracking-widest">Descriptor</th>
+                                            <th className="p-8 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">Protocol Role</th>
+                                            <th className="p-8 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">Status</th>
+                                            <th className="p-8 text-[10px] font-black text-slate-400 uppercase tracking-widest text-right">Actions</th>
                                         </tr>
-                                    ))}
-                                </tbody>
-                            </table>
-                        </div>
+                                    </thead>
+                                    <tbody className="divide-y divide-slate-50">
+                                        {users.map((user, idx) => (
+                                            <tr key={idx} className="hover:bg-blue-50/20 transition-all group">
+                                                <td className="p-8">
+                                                    <div className="flex items-center gap-6">
+                                                        <div className="w-12 h-12 bg-slate-100 rounded-2xl flex items-center justify-center text-slate-400 group-hover:bg-white group-hover:shadow-md transition-all">
+                                                            <Key size={20} />
+                                                        </div>
+                                                        <div>
+                                                            <p className="font-black text-slate-900 leading-none">{user.name}</p>
+                                                            <p className="text-xs font-medium text-slate-400 mt-2">{user.email}</p>
+                                                        </div>
+                                                    </div>
+                                                </td>
+                                                <td className="p-8 text-center">
+                                                    <span className={clsx(
+                                                        "px-4 py-1 rounded-full text-[10px] font-black uppercase tracking-widest",
+                                                        user.role === 'OPS' ? "bg-blue-900 text-white" : "bg-slate-100 text-slate-500"
+                                                    )}>
+                                                        {user.role}
+                                                    </span>
+                                                </td>
+                                                <td className="p-8 text-center text-xs font-bold text-emerald-600">
+                                                    <div className="flex items-center justify-center gap-2">
+                                                        <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]"></div>
+                                                        {user.status}
+                                                    </div>
+                                                </td>
+                                                <td className="p-8 text-right">
+                                                    <button className="p-2 text-slate-300 hover:text-slate-900 transition-all">
+                                                        <ChevronRight size={20} />
+                                                    </button>
+                                                </td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+                        )}
                     </div>
                 </div>
             </div>
@@ -150,14 +189,15 @@ const Admin = () => {
     );
 };
 
-const MenuButton = ({ active, onClick, icon: Icon, label }) => (
+const MenuButton = ({ active, onClick, icon: Icon, label, className }) => (
     <button
         onClick={onClick}
         className={clsx(
             "w-full flex items-center gap-6 p-6 rounded-[2rem] transition-all duration-300 transform",
             active
                 ? "bg-[#003E7E] text-white shadow-2xl translate-x-4"
-                : "bg-white text-slate-400 hover:bg-white hover:text-slate-900 border border-slate-50"
+                : "bg-white text-slate-400 hover:bg-white hover:text-slate-900 border border-slate-50",
+            className
         )}
     >
         <div className={clsx(

@@ -23,8 +23,8 @@ const Login = () => {
             <div className="max-w-4xl w-full bg-white rounded-[2.5rem] shadow-2xl overflow-hidden flex flex-col md:flex-row min-h-[600px] z-10 animate-in fade-in zoom-in duration-500">
                 <div className="md:w-1/2 bg-slate-900 p-12 text-white flex flex-col justify-center">
                     <div className="mb-10">
-                        <div className="w-16 h-16 bg-brand-blue rounded-2xl flex items-center justify-center mb-6 shadow-xl shadow-brand-blue/30">
-                            <BarChart3 className="w-10 h-10" />
+                        <div className="w-16 h-16 bg-white rounded-2xl flex items-center justify-center mb-6 shadow-xl shadow-brand-blue/30 overflow-hidden p-2">
+                            <img src="/logo.jpg" alt="ORION Logo" className="w-full h-full object-contain" />
                         </div>
                         <h1 className="text-5xl font-black mb-4 tracking-tighter">ORION</h1>
                         <p className="text-slate-400 text-lg">On-demand Replenishment and Inventory on Non-Food</p>

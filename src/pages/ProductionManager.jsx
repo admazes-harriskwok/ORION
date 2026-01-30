@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
     Factory,
     Zap,
@@ -10,6 +10,7 @@ import {
     Send,
     ShieldCheck,
     Bell,
+    MessageSquare,
     Loader2,
     ArrowRight,
     RefreshCw,
@@ -23,8 +24,9 @@ import {
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { clsx } from 'clsx';
-import { fetchWorkingOrders, generateProductionPlan, confirmProductionOrder, fetchIntegrationLogs } from '../utils/api';
+import { fetchWorkingOrders, generateProductionPlan, confirmProduction, fetchIntegrationLogs } from '../utils/api';
 import { useAuth } from '../context/AuthContext';
+import CollaborationChat from '../components/CollaborationChat';
 
 const ProductionManager = () => {
     const { role, setRole, user } = useAuth();
@@ -35,9 +37,14 @@ const ProductionManager = () => {
     const [isSimulating, setIsSimulating] = useState(false);
     const [showSyncBanner, setShowSyncBanner] = useState(false);
     const [lastRefresh, setLastRefresh] = useState(null);
-    const [showLogs, setShowLogs] = useState(false);
+    const [showLogs, setShowLogs] = useState(true);
     const [showNextStep, setShowNextStep] = useState(false);
     const [editData, setEditData] = useState({}); // Tracking supplier inputs
+    const [ediDisplay, setEdiDisplay] = useState(null);
+    const [ediLink, setEdiLink] = useState(null);
+
+    // Chat State
+    const [chatConfig, setChatConfig] = useState({ isOpen: false, id: null });
 
     const navigate = useNavigate();
     const supplierCode = localStorage.getItem('orion_supplier_code') || 'MUSTN';
@@ -96,30 +103,72 @@ const ProductionManager = () => {
         }
     };
 
-    // Step 1.4.3: Action for Supplier
+    // Step 1.4.3: Action for Supplier (Individual) or Ops (Execute Workflow)
     const handleConfirmOrder = async (planId) => {
-        const input = editData[planId];
-        const order = orders.find(o => o.planId === planId);
-
-        if (!input.friDate) {
-            alert("❌ VALIDATION ERROR: Confirmed FRI Date is mandatory.");
-            return;
-        }
-
-        // Variance Logic: Trigger_Qty must not exceed Net_Requirement (proposedQty) by more than 10%
-        const maxAllowed = order.proposedQty * 1.10;
-        if (input.triggerQty > maxAllowed) {
-            alert("❌ Validation Failed: Variance exceeds 10% limit.");
-            return;
-        }
-
         setIsProcessing(true);
         try {
-            await confirmProductionOrder(planId, input.triggerQty, input.friDate);
-            alert(`✅ Order Confirmed. EDI 850 Sent.`);
+            if (planId.startsWith('CONS_')) {
+                const consRow = filteredOrders.find(o => o.planId === planId);
+                // Confirm all underlying orders
+                for (const pId of consRow.underlyingPlanIds) {
+                    const input = editData[pId];
+                    await confirmProduction(pId, input.triggerQty, input.friDate);
+                }
+                alert(`✅ ${consRow.underlyingPlanIds.length} Component Orders Confirmed. EDI 850 Sent.`);
+            } else {
+                const input = editData[planId];
+                const result = await confirmProduction(planId, input.triggerQty, input.friDate);
+                if (result.status === 'success' || result.edi_content) {
+                    setEdiDisplay(result.edi_content);
+                    setEdiLink(result.edi_link);
+                    setShowLogs(true); // Auto-show logs to see the EDI
+                }
+                alert(`✅ Order Confirmed. EDI 850 Sent.`);
+            }
             await loadData();
         } catch (err) {
             alert("❌ ERROR: Order confirmation failed. " + err.message);
+        } finally {
+            setIsProcessing(false);
+        }
+    };
+
+    const handleExecute143 = async () => {
+        const proposals = orders.filter(o => o.status === 'PROPOSAL' || o.status === 'PENDING_APPROVAL');
+        if (proposals.length === 0) {
+            alert("No pending proposals found to confirm.");
+            return;
+        }
+
+        if (!confirm(`🚀 EXECUTE STEP 1.4.3: This will trigger the final production commitment and EDI 850 transmission for ${proposals.length} orders. Proceed?`)) return;
+
+        setIsProcessing(true);
+        setShowSyncBanner(true);
+
+        try {
+            for (const order of proposals) {
+                const input = editData[order.planId] || { triggerQty: order.proposedQty, friDate: '2026-03-30' };
+                const result = await confirmProduction(order.planId, input.triggerQty, input.friDate || '2026-03-30');
+                if (result.edi_content) {
+                    setEdiDisplay(result.edi_content);
+                    setEdiLink(result.edi_link);
+                }
+                // Small delay to prevent n8n execution bursting
+                await new Promise(r => setTimeout(r, 300));
+            }
+
+            alert("✅ STEP 1.4.3 EXECUTED: All selected production orders have been confirmed and EDI 850 files transmitted.");
+
+            // Sequential refreshes to avoid concurrent executions
+            await loadData(false);
+            await new Promise(r => setTimeout(r, 4000));
+            await loadData(false);
+
+            setShowSyncBanner(false);
+
+        } catch (err) {
+            alert("❌ EXECUTION FAILED: " + err.message);
+            setShowSyncBanner(false);
         } finally {
             setIsProcessing(false);
         }
@@ -138,15 +187,16 @@ const ProductionManager = () => {
             // Reusing calculateOrders with SIMULATE_INPUTS as a proxy for bulk confirm in this demo
             await (await import('../utils/api')).calculateOrders("SIMULATE_INPUTS");
 
-            // Multiple refreshes to handle GS Latency
-            setTimeout(() => loadData(false), 4000);
-            setTimeout(() => loadData(false), 8000);
-            setTimeout(() => {
-                loadData(false);
-                setShowSyncBanner(false);
-                setIsSimulating(false);
-                alert("✅ BATCH COMPLETE: All proposals successfully confirmed.");
-            }, 12000);
+            // Sequential refreshes to avoid concurrent executions
+            await loadData(false);
+            await new Promise(r => setTimeout(r, 4000));
+            await loadData(false);
+            await new Promise(r => setTimeout(r, 4000));
+            await loadData(false);
+
+            setShowSyncBanner(false);
+            setIsSimulating(false);
+            alert("✅ BATCH COMPLETE: All proposals successfully confirmed.");
 
         } catch (err) {
             alert("❌ BATCH ERROR: Failed to bulk confirm: " + err.message);
@@ -168,14 +218,16 @@ const ProductionManager = () => {
             const { manageOrders } = await import('../utils/api');
             await manageOrders(pendingOrders.map(o => o.planId), 'APPROVE_RPO');
 
-            setTimeout(() => loadData(false), 4000);
-            setTimeout(() => loadData(false), 8000);
-            setTimeout(() => {
-                loadData(false);
-                setShowSyncBanner(false);
-                setIsProcessing(false);
-                alert("✅ SUCCESS: All pending orders have been approved and moved to CONFIRMED status.");
-            }, 12000);
+            // Sequential refreshes to avoid concurrent executions
+            await loadData(false);
+            await new Promise(r => setTimeout(r, 4000));
+            await loadData(false);
+            await new Promise(r => setTimeout(r, 4000));
+            await loadData(false);
+
+            setShowSyncBanner(false);
+            setIsProcessing(false);
+            alert("✅ SUCCESS: All pending orders have been approved and moved to CONFIRMED status.");
 
         } catch (err) {
             alert("❌ ERROR: Batch approval failed: " + err.message);
@@ -184,23 +236,77 @@ const ProductionManager = () => {
         }
     };
 
-    const handleInputChange = (planId, field, value) => {
-        setEditData(prev => ({
-            ...prev,
-            [planId]: {
-                ...prev[planId],
-                [field]: value
+    const handleInputChange = (id, field, value) => {
+        if (id.startsWith('CONS_')) {
+            // Consolidated Edit Distribution
+            const consRow = filteredOrders.find(o => o.planId === id);
+            if (!consRow) return;
+
+            if (field === 'triggerQty') {
+                const newTotal = parseInt(value) || 0;
+                const oldTotal = consRow.proposedQty;
+
+                setEditData(prev => {
+                    const next = { ...prev };
+                    consRow.underlyingPlanIds.forEach(pId => {
+                        const originalOrder = orders.find(o => o.planId === pId);
+                        // Proportionally distribute the new total
+                        const ratio = oldTotal > 0 ? (originalOrder.proposedQty / oldTotal) : (1 / consRow.underlyingPlanIds.length);
+                        next[pId] = {
+                            ...prev[pId],
+                            triggerQty: Math.round(newTotal * ratio)
+                        };
+                    });
+                    return next;
+                });
+            } else {
+                // Apply date etc to all
+                setEditData(prev => {
+                    const next = { ...prev };
+                    consRow.underlyingPlanIds.forEach(pId => {
+                        next[pId] = {
+                            ...prev[pId],
+                            [field]: value
+                        };
+                    });
+                    return next;
+                });
             }
-        }));
+        } else {
+            setEditData(prev => ({
+                ...prev,
+                [id]: {
+                    ...prev[id],
+                    [field]: value
+                }
+            }));
+        }
     };
 
-    // Filtering logic based on role (Step 1.4.2)
-    const filteredOrders = orders.filter(order => {
-        if (role === 'OPS') return true;
-        // In real app, order would have supplierCode. Using current productCode prefix as mock or checking vendor name if available.
-        // For demo, we show everything to both unless specifically told to filter by a hardcoded code.
-        return true;
-    });
+    // Filtering and Consolidation logic (Step 1.4.2 & Supplier Consolidation)
+    const filteredOrders = useMemo(() => {
+        if (role === 'OPS') return orders;
+
+        // Consolidate for Supplier: Group by ProductCode + FRI Date + Status
+        const groupMap = {};
+        orders.forEach(order => {
+            const key = `${order.productCode}_${order.friDate}_${order.status}`;
+            if (!groupMap[key]) {
+                groupMap[key] = {
+                    ...order,
+                    planId: `CONS_${key}`,
+                    proposedQty: 0,
+                    triggerQty: 0,
+                    underlyingPlanIds: [],
+                    isConsolidated: true
+                };
+            }
+            groupMap[key].proposedQty += (order.proposedQty || 0);
+            groupMap[key].triggerQty += (order.triggerQty || 0);
+            groupMap[key].underlyingPlanIds.push(order.planId);
+        });
+        return Object.values(groupMap);
+    }, [orders, role]);
 
     return (
         <div className="space-y-10 animate-in fade-in duration-500 pb-20">
@@ -267,6 +373,13 @@ const ProductionManager = () => {
                     {role === 'OPS' && (
                         <div className="flex gap-4">
                             <button
+                                onClick={handleExecute143}
+                                disabled={isProcessing}
+                                className="bg-slate-900 text-white px-8 py-4 rounded-2xl font-black text-xs uppercase tracking-widest shadow-xl border border-white/10 hover:bg-black transition-all flex items-center gap-3 active:scale-95"
+                            >
+                                <Zap size={16} className="text-amber-400" /> Execute 1.4.3: Final Confirmation
+                            </button>
+                            <button
                                 onClick={handleBatchApprove}
                                 disabled={isProcessing || !orders.some(o => o.status === 'PENDING_APPROVAL')}
                                 className={clsx(
@@ -320,72 +433,7 @@ const ProductionManager = () => {
                 </div>
             </div>
 
-            {/* Step 1.4.3: Integration Log Console (Moved to Active Area) */}
-            {role === 'OPS' && (
-                <div className="bg-slate-900 rounded-[3rem] p-1 shadow-2xl overflow-hidden animate-in zoom-in duration-500">
-                    <div className="p-8 pb-4 flex items-center justify-between">
-                        <div className="flex items-center gap-4">
-                            <div className="w-10 h-10 bg-emerald-500/10 text-emerald-500 rounded-xl flex items-center justify-center border border-emerald-500/20">
-                                <Terminal size={20} />
-                            </div>
-                            <div className="space-y-0.5">
-                                <h4 className="text-sm font-black text-white uppercase tracking-wider">Step 1.4.3: PSS Integration Engine</h4>
-                                <div className="flex items-center gap-2">
-                                    <div className={clsx(
-                                        "w-1.5 h-1.5 rounded-full",
-                                        (isProcessing || isSimulating) ? "bg-blue-500 animate-ping" : "bg-emerald-500 animate-pulse"
-                                    )} />
-                                    <span className={clsx(
-                                        "text-[9px] font-black uppercase tracking-[0.2em]",
-                                        (isProcessing || isSimulating) ? "text-blue-400" : "text-emerald-500/70"
-                                    )}>
-                                        {(isProcessing || isSimulating) ? 'n8n Workflow Executing...' : 'Connected & Monitoring Live Pulses'}
-                                    </span>
-                                </div>
-                            </div>
-                        </div>
-                        <button
-                            onClick={() => setShowLogs(!showLogs)}
-                            className="text-[10px] font-black text-slate-400 uppercase tracking-widest hover:text-white transition-all flex items-center gap-2 bg-white/5 px-4 py-2 rounded-xl"
-                        >
-                            {showLogs ? "Close Console" : "Expand Matrix"}
-                        </button>
-                    </div>
 
-                    {showLogs && (
-                        <div className="p-8 pt-0 font-mono text-[10px]">
-                            <div className="bg-black/40 rounded-2xl p-6 border border-white/5 space-y-2 max-h-[250px] overflow-auto custom-scrollbar">
-                                {(isProcessing || isSimulating) && (
-                                    <div className="flex gap-4 group border-b border-blue-500/20 pb-2 mb-2 animate-pulse">
-                                        <span className="text-slate-600">[{new Date().toLocaleTimeString()}]</span>
-                                        <span className="text-blue-400 font-bold w-20">SYSTEM</span>
-                                        <span className="text-slate-400">REF: PENDING</span>
-                                        <span className="text-blue-500 font-black uppercase tracking-widest ml-auto">● RUNNING</span>
-                                        <span className="text-slate-300 italic">Executing EDI 850 Logic & Drive Upload...</span>
-                                    </div>
-                                )}
-                                {logs.length > 0 ? logs.map((log, i) => (
-                                    <div key={i} className="flex gap-4 group border-b border-white/5 pb-2 last:border-0 hover:bg-white/5 transition-colors">
-                                        <span className="text-slate-600">[{log.timestamp}]</span>
-                                        <span className="text-blue-400 font-bold w-20">{log.type}</span>
-                                        <span className="text-slate-400">REF: {log.reference}</span>
-                                        <span className={clsx("font-black uppercase tracking-widest ml-auto",
-                                            log.status === 'SENT' ? "text-emerald-500" : "text-rose-500")}>
-                                            {log.status === 'SENT' ? '● SENT' : '● FAIL'}
-                                        </span>
-                                        <span className="text-slate-500 italic max-w-sm truncate">— {log.message}</span>
-                                    </div>
-                                )) : !isProcessing && !isSimulating && (
-                                    <div className="py-10 text-center space-y-3 opacity-40">
-                                        <Loader2 size={24} className="animate-spin mx-auto text-emerald-500" />
-                                        <p className="text-emerald-500 font-black uppercase tracking-[0.3em]">Awaiting EDI 850 Handshake...</p>
-                                    </div>
-                                )}
-                            </div>
-                        </div>
-                    )}
-                </div>
-            )}
 
             {/* Main Grid */}
             <div className="bg-white rounded-[3rem] border border-slate-100 shadow-xl overflow-hidden min-h-[500px]">
@@ -393,13 +441,13 @@ const ProductionManager = () => {
                     <table className="w-full text-left border-collapse">
                         <thead>
                             <tr className="bg-slate-50/50">
-                                <th className="p-8 text-[10px] font-black text-slate-400 uppercase tracking-widest">Plan ID</th>
+                                <th className="p-8 text-[10px] font-black text-slate-400 uppercase tracking-widest">Reference</th>
                                 <th className="p-8 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">Product</th>
-                                <th className="p-8 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">Proposed Qty</th>
+                                <th className="p-8 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">Net Requirement</th>
                                 <th className="p-8 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">Trigger Qty</th>
                                 <th className="p-8 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">FRI Date</th>
                                 <th className="p-8 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">Status</th>
-                                <th className="p-8 text-[10px] font-black text-slate-400 uppercase tracking-widest text-right">Action</th>
+                                <th className="p-8 text-[10px] font-black text-slate-400 uppercase tracking-widest text-right pr-10">Action</th>
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-50">
@@ -412,9 +460,15 @@ const ProductionManager = () => {
                             ) : filteredOrders.map((order) => {
                                 const isDraft = order.status === 'PROPOSAL';
                                 const isPending = order.status === 'PENDING_APPROVAL';
-                                const inputs = editData[order.planId] || { triggerQty: order.triggerQty, friDate: order.friDate };
 
-                                // Step 1.4.2: Variance Highlighting (> 10%)
+                                const inputs = order.isConsolidated
+                                    ? {
+                                        triggerQty: order.underlyingPlanIds.reduce((sum, pId) => sum + (editData[pId]?.triggerQty || 0), 0),
+                                        friDate: editData[order.underlyingPlanIds[0]]?.friDate || order.friDate
+                                    }
+                                    : (editData[order.planId] || { triggerQty: order.triggerQty, friDate: order.friDate });
+
+                                // Variance Highlighting (> 10%)
                                 const variance = Math.abs(inputs.triggerQty - order.proposedQty) / order.proposedQty;
                                 const hasVarianceError = variance > 0.1;
 
@@ -425,8 +479,12 @@ const ProductionManager = () => {
                                     )}>
                                         <td className="p-8">
                                             <div className="flex flex-col">
-                                                <span className="text-sm font-black text-slate-900 leading-none">{order.planId}</span>
-                                                <span className="text-[10px] font-bold text-slate-400 uppercase mt-1">Ref: {order.client}</span>
+                                                <span className="text-sm font-black text-slate-900 leading-none">
+                                                    {order.isConsolidated ? `CMD_${order.productCode}` : order.planId}
+                                                </span>
+                                                {role === 'OPS' && (
+                                                    <span className="text-[10px] font-bold text-slate-400 uppercase mt-1">Ref: {order.client}</span>
+                                                )}
                                             </div>
                                         </td>
                                         <td className="p-8 text-center">
@@ -504,21 +562,31 @@ const ProductionManager = () => {
                                         </td>
 
                                         <td className="p-8 text-right">
-                                            {role === 'SUPPLIER' && isDraft && (
+                                            <div className="flex items-center justify-end gap-3">
+                                                {role === 'SUPPLIER' && isDraft && (
+                                                    <button
+                                                        onClick={() => handleConfirmOrder(order.planId)}
+                                                        disabled={isProcessing || !inputs.friDate}
+                                                        className="bg-emerald-600 text-white px-6 py-2 rounded-xl font-black text-[10px] uppercase tracking-widest shadow-lg shadow-emerald-100 hover:bg-emerald-700 transition-all disabled:opacity-30 disabled:grayscale"
+                                                    >
+                                                        Confirm Order
+                                                    </button>
+                                                )}
+                                                {order.status === 'CONFIRMED' && (
+                                                    <div className="flex items-center gap-2 text-emerald-500">
+                                                        <ShieldCheck size={18} />
+                                                        <span className="text-[10px] font-black uppercase italic tracking-tighter">EDI Transmitted</span>
+                                                    </div>
+                                                )}
+                                                {/* Chat Button */}
                                                 <button
-                                                    onClick={() => handleConfirmOrder(order.planId)}
-                                                    disabled={isProcessing || !inputs.friDate}
-                                                    className="bg-emerald-600 text-white px-6 py-2 rounded-xl font-black text-[10px] uppercase tracking-widest shadow-lg shadow-emerald-100 hover:bg-emerald-700 transition-all disabled:opacity-30 disabled:grayscale"
+                                                    onClick={() => setChatConfig({ isOpen: true, id: order.planId })}
+                                                    className="w-10 h-10 flex items-center justify-center rounded-xl bg-blue-50 text-blue-600 hover:bg-blue-600 hover:text-white transition-all border border-blue-100 shadow-sm"
+                                                    title="Order Collaboration"
                                                 >
-                                                    Confirm Order
+                                                    <MessageSquare size={16} />
                                                 </button>
-                                            )}
-                                            {order.status === 'CONFIRMED' && (
-                                                <div className="flex items-center justify-end gap-2 text-emerald-500">
-                                                    <ShieldCheck size={18} />
-                                                    <span className="text-[10px] font-black uppercase italic tracking-tighter">EDI Transmitted</span>
-                                                </div>
-                                            )}
+                                            </div>
                                         </td>
                                     </tr>
                                 );
@@ -527,6 +595,98 @@ const ProductionManager = () => {
                     </table>
                 </div>
             </div>
+
+            {/* Step 1.4.3: Integration Log Console (Now below table) */}
+            {role === 'OPS' && (
+                <div className="bg-slate-900 rounded-[3rem] p-1 shadow-2xl overflow-hidden animate-in zoom-in duration-500 my-10">
+                    <div className="p-8 pb-4 flex items-center justify-between">
+                        <div className="flex items-center gap-4">
+                            <div className="w-10 h-10 bg-emerald-500/10 text-emerald-500 rounded-xl flex items-center justify-center border border-emerald-500/20">
+                                <Terminal size={20} />
+                            </div>
+                            <div className="space-y-0.5">
+                                <h4 className="text-sm font-black text-white uppercase tracking-wider">Step 1.4.3: PSS Integration Engine</h4>
+                                <div className="flex items-center gap-2">
+                                    <div className={clsx(
+                                        "w-1.5 h-1.5 rounded-full",
+                                        (isProcessing || isSimulating) ? "bg-blue-500 animate-ping" : "bg-emerald-500 animate-pulse"
+                                    )} />
+                                    <span className={clsx(
+                                        "text-[9px] font-black uppercase tracking-[0.2em]",
+                                        (isProcessing || isSimulating) ? "text-blue-400" : "text-emerald-500/70"
+                                    )}>
+                                        {(isProcessing || isSimulating) ? 'n8n Workflow Executing...' : 'Connected & Monitoring Live Pulses'}
+                                    </span>
+                                </div>
+                            </div>
+                        </div>
+                        <button
+                            onClick={() => setShowLogs(!showLogs)}
+                            className="text-[10px] font-black text-slate-400 uppercase tracking-widest hover:text-white transition-all flex items-center gap-2 bg-white/5 px-4 py-2 rounded-xl"
+                        >
+                            {showLogs ? "Close Console" : "Expand Matrix"}
+                        </button>
+                    </div>
+
+                    {showLogs && (
+                        <div className="p-8 pt-0 font-mono text-[10px] space-y-6">
+                            {/* EDI Content Viewer (Step 1.4.3 Requirements) */}
+                            {ediDisplay && (
+                                <div className="bg-black/60 rounded-2xl p-6 border border-emerald-500/20 animate-in fade-in slide-in-from-top-4">
+                                    <div className="flex items-center justify-between mb-4">
+                                        <div className="flex items-center gap-2">
+                                            <FileText size={14} className="text-emerald-500" />
+                                            <span className="text-emerald-500 font-black uppercase tracking-widest">Live Generated EDI 850 Segment</span>
+                                        </div>
+                                        {ediLink && (
+                                            <a
+                                                href={ediLink}
+                                                target="_blank"
+                                                rel="noreferrer"
+                                                className="text-blue-400 hover:text-blue-300 flex items-center gap-1 border-b border-blue-400/30 font-bold"
+                                            >
+                                                Download .edi File
+                                            </a>
+                                        )}
+                                    </div>
+                                    <pre className="text-emerald-400 font-mono text-[11px] leading-relaxed whitespace-pre-wrap overflow-auto max-h-[400px] bg-slate-900/50 p-4 rounded-xl custom-scrollbar border border-white/5">
+                                        {ediDisplay}
+                                    </pre>
+                                </div>
+                            )}
+
+                            <div className="bg-black/40 rounded-2xl p-6 border border-white/5 space-y-2 max-h-[250px] overflow-auto custom-scrollbar">
+                                {(isProcessing || isSimulating) && (
+                                    <div className="flex gap-4 group border-b border-blue-500/20 pb-2 mb-2 animate-pulse">
+                                        <span className="text-slate-600">[{new Date().toLocaleTimeString()}]</span>
+                                        <span className="text-blue-400 font-bold w-20">SYSTEM</span>
+                                        <span className="text-slate-400">REF: PENDING</span>
+                                        <span className="text-blue-500 font-black uppercase tracking-widest ml-auto">● RUNNING</span>
+                                        <span className="text-slate-300 italic">Executing EDI 850 Logic & Drive Upload...</span>
+                                    </div>
+                                )}
+                                {logs.length > 0 ? logs.map((log, i) => (
+                                    <div key={i} className="flex gap-4 group border-b border-white/5 pb-2 last:border-0 hover:bg-white/5 transition-colors">
+                                        <span className="text-slate-600">[{log.timestamp}]</span>
+                                        <span className="text-blue-400 font-bold w-20">{log.type}</span>
+                                        <span className="text-slate-400">REF: {log.reference}</span>
+                                        <span className={clsx("font-black uppercase tracking-widest ml-auto",
+                                            log.status === 'SENT' ? "text-emerald-500" : "text-rose-500")}>
+                                            {log.status === 'SENT' ? '● SENT' : '● FAIL'}
+                                        </span>
+                                        <span className="text-slate-500 italic max-w-sm truncate">— {log.message}</span>
+                                    </div>
+                                )) : !isProcessing && !isSimulating && (
+                                    <div className="py-10 text-center space-y-3 opacity-40">
+                                        <Loader2 size={24} className="animate-spin mx-auto text-emerald-500" />
+                                        <p className="text-emerald-500 font-black uppercase tracking-[0.3em]">Awaiting EDI 850 Handshake...</p>
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                    )}
+                </div>
+            )}
 
             {/* Next Step Card: Step 1.5.1 */}
             {showNextStep && (
@@ -554,6 +714,13 @@ const ProductionManager = () => {
                     </div>
                 </div>
             )}
+            {/* Chat Sidebar */}
+            <CollaborationChat
+                isOpen={chatConfig.isOpen}
+                onClose={() => setChatConfig({ ...chatConfig, isOpen: false })}
+                contextId={chatConfig.id}
+                contextType="ORDER"
+            />
         </div>
     );
 };

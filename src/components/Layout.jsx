@@ -20,12 +20,14 @@ import {
     Bell,
     AlertTriangle,
     Layers,
-    RefreshCw
+    RefreshCw,
+    MessageSquare
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { clsx } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import { runFullCycle, WORKFLOW_MAP, BASE_URL } from '../utils/api';
+import CollaborationChat from './CollaborationChat';
 
 function cn(...inputs) {
     return twMerge(clsx(...inputs));
@@ -50,31 +52,18 @@ const Sidebar = () => {
 
     // Locking Logic
     const isLocked = (path) => {
-        // Unlocked for testing and demo purposes
         return false;
-        /*
-        if (path === '/' || path === '/admin' || path === '/config') return false;
-        if (path === '/assortment') return localStorage.getItem('prereq_masterDataSynced') !== 'true';
-        if (path === '/supply-parameter') return localStorage.getItem('prereq_assortmentConfirmed') !== 'true';
-        if (path === '/supply-plan') return localStorage.getItem('bridge_step1') !== 'SUCCESS';
-        if (path === '/volume-forecast') return localStorage.getItem('bridge_step2') !== 'SUCCESS';
-        if (path === '/production') return localStorage.getItem('bridge_step3') !== 'SUCCESS';
-        if (path === '/inventory') return localStorage.getItem('bridge_step3') !== 'SUCCESS'; // Unlocked alongside 1.4 for demo/testing
-        // if (path === '/shipments') return localStorage.getItem('bridge_step5') !== 'SUCCESS'; // Unlocked for demo
-        return false;
-        */
     };
 
     return (
         <div className="w-64 bg-[#003E7E] min-h-screen text-white flex flex-col fixed left-0 top-0 shadow-2xl z-50">
             <div className="p-8 pb-4">
                 <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center shadow-lg">
-                        <BarChart3 className="text-[#003E7E] w-6 h-6" />
+                    <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center shadow-lg overflow-hidden p-1">
+                        <img src="/logo.jpg" alt="ORION Logo" className="w-full h-full object-contain" />
                     </div>
                     <div>
                         <span className="text-2xl font-black tracking-tighter block leading-none">ORION</span>
-                        <span className="text-[10px] font-bold text-blue-300 uppercase tracking-widest">Control Tower</span>
                     </div>
                 </div>
             </div>
@@ -178,19 +167,6 @@ const ProcessStepper = () => {
 const Header = () => {
     const { user, role, logout, toggleRole, season, collectionId } = useAuth();
     const navigate = useNavigate();
-    const [isProcessing, setIsProcessing] = React.useState(false);
-
-    const handleRunFullCycle = async () => {
-        setIsProcessing(true);
-        try {
-            await runFullCycle(user?.email || 'admin@carrefour.com');
-            alert("Full Cycle Orchestrated! Notification email will be sent upon completion.");
-        } catch (err) {
-            alert("Failed to trigger orchestrator.");
-        } finally {
-            setIsProcessing(false);
-        }
-    };
 
     const handleLogout = () => {
         logout();
@@ -204,7 +180,6 @@ const Header = () => {
             </div>
 
             <div className="flex items-center gap-2 lg:gap-6 shrink-0">
-                {/* Context Badge */}
                 <div className="hidden xl:flex items-center gap-2 bg-blue-50 px-4 py-2.5 rounded-xl border border-blue-100">
                     <Layers className="w-3.5 h-3.5 text-[#003E7E]" />
                     <span className="text-[10px] font-black uppercase tracking-widest text-[#003E7E]">
@@ -243,6 +218,7 @@ const Header = () => {
 const Layout = () => {
     const { role } = useAuth();
     const navigate = useNavigate();
+    const [chatConfig, setChatConfig] = React.useState({ isOpen: false, id: 'GLOBAL_COLLAB' });
 
     React.useEffect(() => {
         if (!role) {
@@ -261,6 +237,26 @@ const Layout = () => {
                     <Outlet />
                 </main>
             </div>
+
+            {/* Global Chat Toggle */}
+            <button
+                onClick={() => setChatConfig({ ...chatConfig, isOpen: true })}
+                className="fixed bottom-8 right-8 w-16 h-16 bg-slate-900 text-white rounded-full flex items-center justify-center shadow-2xl hover:bg-[#003E7E] transition-all hover:scale-110 active:scale-95 z-50 animate-in slide-in-from-bottom-10"
+                title="Open Collaboration Workspace"
+            >
+                <div className="relative">
+                    <MessageSquare size={28} />
+                    <span className="absolute -top-1 -right-1 w-3 h-3 bg-emerald-500 rounded-full border-2 border-slate-900 animate-pulse"></span>
+                </div>
+            </button>
+
+            {/* Chat Sidebar */}
+            <CollaborationChat
+                isOpen={chatConfig.isOpen}
+                onClose={() => setChatConfig({ ...chatConfig, isOpen: false })}
+                contextId={chatConfig.id}
+                contextType="GLOBAL"
+            />
         </div>
     );
 };

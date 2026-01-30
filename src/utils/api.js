@@ -116,7 +116,7 @@ async function request(endpoint, options = {}, mockFallback = null) {
 }
 
 export const fetchDashboardStats = () => request('/dashboard-stats', { method: 'GET' }, mockDashboardStats);
-export const fetchSupplyPlan = async () => {
+export const fetchSupplyPlan = async (version = "LATEST") => {
     const csvUrl = 'https://docs.google.com/spreadsheets/d/1TaqgVyZHO2VWTSxFI0vWVVJ08MGKAw1ZgpajgZWcFUM/export?format=csv&gid=221473829';
     try {
         const response = await fetch(csvUrl);
@@ -124,41 +124,64 @@ export const fetchSupplyPlan = async () => {
         return new Promise((resolve, reject) => {
             Papa.parse(csvData, {
                 header: true,
-                skipEmptyLines: true,
+                skipEmptyLines: 'greedy',
                 complete: (results) => {
-                    const mapped = results.data.map((row) => ({
-                        planId: row.Plan_ID || row.Ref_ID,
-                        client: row.PSS_Client_Code || row.Client_Code || 'Unknown',
-                        productCode: row.Product_Code,
-                        productName: row.Description || row.Product_Description || 'No Desc',
-                        country: row.PSS_Warehouse || row.POL || 'Global',
-                        netReq: row.Supply_Qty || row.Quantity || 0,
-                        friDate: row.Period || row.Forecast_Month || 'TBD',
-                        status: row.Status || row.Version || 'PROPOSAL',
+                    const mapped = results.data
+                        .map((row) => {
+                            const planId = (row.Plan_ID || row.Ref_ID || "").toString().trim();
+                            const pCode = (row.Product_Code || "").toString().trim();
+                            return {
+                                planId: planId,
+                                version: row.Version_number || '202512',
+                                lastUpdate: row.Last_update_date || '2026-01-30',
+                                pssClient: row.PSS_client_code || row.PSS_Client_Code || row.Client_Code || 'Unknown',
+                                pssWarehouse: row.PSS_warehouse || row.PSS_Warehouse || row.POL || 'Global',
+                                productBarcode: row.Product_barcode || '',
+                                masterBarcode: row.Master_barcode || '',
+                                pssSupplier: row.PSS_supplier_code || row.Supplier_Name || '',
 
-                        // Manager Metadata
-                        supplier: row.Supplier_Name,
-                        dept: row.Department,
-                        family: row.Family_Group_Code,
-                        pcb: row.Master_PCB,
-                        unit: row.Purchasing_Unit,
+                                // Legacy mappings for backward compatibility
+                                client: row.PSS_client_code || row.Client_Code || 'Unknown',
+                                productCode: pCode,
+                                productName: row.Description || row.Product_Description || 'No Desc',
+                                country: row.PSS_warehouse || row.POL || 'Global',
+                                netReq: parseInt(row.Supply_Qty || row.Quantity || 0),
+                                friDate: row.Period || row.Forecast_Month || 'TBD',
+                                status: row.Status || row.Version || 'PROPOSAL',
+                                supplier: row.Supplier_Name,
+                                dept: row.Department,
+                                family: row.Family_Group_Code,
+                                pcb: row.Master_PCB,
+                                unit: row.Purchasing_Unit,
+                                months: {
+                                    jan: parseInt(row.Jan_2026 || 0), feb: parseInt(row.Feb_2026 || 0), mar: parseInt(row.Mar_2026 || 0),
+                                    apr: parseInt(row.Apr_2026 || 0), may: parseInt(row.May_2026 || 0), jun: parseInt(row.June_2026 || 0),
+                                    jul: parseInt(row.July_2026 || 0), aug: parseInt(row.Aug_2026 || 0), sep: parseInt(row.Sep_2026 || 0),
+                                    oct: parseInt(row.Oct_2026 || 0), nov: parseInt(row.Nov_2026 || 0), dec: parseInt(row.Dec_2026 || 0)
+                                }
+                            };
+                        })
+                        .filter(item => item.planId !== "" && item.productCode !== "");
 
-                        // Monthly Breakdown
-                        months: {
-                            jan: row.Jan_2026, feb: row.Feb_2026, mar: row.Mar_2026,
-                            apr: row.Apr_2026, may: row.May_2026, jun: row.June_2026,
-                            jul: row.July_2026, aug: row.Aug_2026, sep: row.Sep_2026
-                        }
-                    })).filter(item => item.planId);
+                    console.log(`[ORION API] fetchSupplyPlan: Searched CSV. Found ${mapped.length} valid data rows.`);
                     resolve(mapped);
                 },
                 error: (err) => reject(err)
             });
         });
     } catch (err) {
-        console.error("Failed to fetch live supply plan:", err);
-        return mockSupplyPlan; // Fallback to mock on network error
+        console.warn("[ORION API] Live Supply Plan Fetch Failed - Falling back to Mock Data.", err);
+        return mockSupplyPlan;
     }
+};
+
+export const fetchSupplyPlanVersions = async () => {
+    // Current simulation of available versions
+    return [
+        { id: '202512', name: 'Dec 2025 (Active)', date: '2026-01-30' },
+        { id: '202511', name: 'Nov 2025', date: '2025-12-28' },
+        { id: '202510', name: 'Oct 2025', date: '2025-11-30' }
+    ];
 };
 export const fetchWorkingOrders = async () => {
     const csvUrl = 'https://docs.google.com/spreadsheets/d/1TaqgVyZHO2VWTSxFI0vWVVJ08MGKAw1ZgpajgZWcFUM/export?format=csv&gid=1538758206';
@@ -167,23 +190,30 @@ export const fetchWorkingOrders = async () => {
     return new Promise((resolve, reject) => {
         Papa.parse(csvData, {
             header: true,
-            skipEmptyLines: true,
+            skipEmptyLines: 'greedy',
             complete: (results) => {
-                const mapped = results.data.map((row) => ({
-                    planId: row.Plan_ID,
-                    productCode: row.Product_Code,
-                    supplierCode: row.Supplier_Code,
-                    proposedQty: parseInt(row.Net_Requirement || row.Order_Quantity || 0),
-                    triggerQty: parseInt(row.Trigger_Qty || 0),
-                    friDate: row.Confirmed_FRI_Date || '',
-                    status: row.Status,
-                    notificationSent: row.Notification_Sent === 'TRUE',
-                    ediRef: row.EDI_Reference_850,
-                    // Keeping legacy fields for layout if needed
-                    client: row.Client_Code || 'Global',
-                    pod: row.Warehouse_Code || 'Global',
-                    price: parseFloat(row.Total_Value_USD || 0)
-                })).filter(item => item.planId);
+                const mapped = results.data
+                    .map((row) => {
+                        const planId = (row.Plan_ID || "").toString().trim();
+                        const pCode = (row.Product_Code || "").toString().trim();
+                        return {
+                            planId: planId,
+                            productCode: pCode,
+                            supplierCode: row.Supplier_Code,
+                            proposedQty: parseInt(row.Net_Requirement || row.Order_Quantity || 0),
+                            triggerQty: parseInt(row.Trigger_Qty || 0),
+                            friDate: row.Confirmed_FRI_Date || '',
+                            status: row.Status,
+                            notificationSent: row.Notification_Sent === 'TRUE',
+                            ediRef: row.EDI_Reference_850,
+                            client: row.Client_Code || 'Global',
+                            pod: row.Warehouse_Code || 'Global',
+                            price: parseFloat(row.Total_Value_USD || 0)
+                        };
+                    })
+                    .filter(item => item.planId !== "" && item.productCode !== "");
+
+                console.log(`[ORION API] fetchWorkingOrders: Searched rows. Found ${mapped.length} valid data rows starting from the first non-empty sequence.`);
                 resolve(mapped);
             },
             error: (err) => reject(err)
@@ -198,15 +228,17 @@ export const fetchInventory = async () => {
     return new Promise((resolve, reject) => {
         Papa.parse(csvData, {
             header: true,
-            skipEmptyLines: true,
+            skipEmptyLines: 'greedy',
             complete: (results) => {
-                const mapped = results.data.map((row) => ({
-                    productCode: row.Product_Code,
-                    wipQty: parseInt(row.WIP_Qty || 0),
-                    okqcQty: parseInt(row.OKQC_Qty || 0),
-                    safetyStock: parseInt(row.Safety_Stock || 0),
-                    lastUpdated: row.Last_Updated
-                })).filter(item => item.productCode);
+                const mapped = results.data
+                    .map((row) => ({
+                        productCode: (row.Product_Code || "").toString().trim(),
+                        wipQty: parseInt(row.WIP_Qty || 0),
+                        okqcQty: parseInt(row.OKQC_Qty || 0),
+                        safetyStock: parseInt(row.Safety_Stock || 0),
+                        lastUpdated: row.Last_Updated
+                    }))
+                    .filter(item => item.productCode !== "");
                 resolve(mapped);
             },
             error: (err) => reject(err)
@@ -288,6 +320,27 @@ export const fetchShipments = async () => {
     }
 };
 
+export const fetchShipmentProposals = async () => {
+    const csvUrl = 'https://docs.google.com/spreadsheets/d/1TaqgVyZHO2VWTSxFI0vWVVJ08MGKAw1ZgpajgZWcFUM/export?format=csv&gid=1592123495';
+    try {
+        const response = await fetch(csvUrl);
+        const csvData = await response.text();
+        return new Promise((resolve, reject) => {
+            Papa.parse(csvData, {
+                header: true,
+                skipEmptyLines: true,
+                complete: (results) => {
+                    resolve(results.data);
+                },
+                error: (err) => reject(err)
+            });
+        });
+    } catch (err) {
+        console.error("Failed to fetch shipment proposals:", err);
+        return [];
+    }
+};
+
 export const fetchShipmentLines = async (shipmentId) => {
     const csvUrl = 'https://docs.google.com/spreadsheets/d/1TaqgVyZHO2VWTSxFI0vWVVJ08MGKAw1ZgpajgZWcFUM/export?format=csv&gid=789123456'; // Placeholder GID for Shipment_Lines
     const response = await fetch(csvUrl);
@@ -349,7 +402,7 @@ export const fetchPlmStaging = async () => {
                     desc: row.Description,
                     price: parseFloat(row.Unit_Price || 0),
                     pcb: parseInt(row.PCB || 0),
-                    status: 'PENDING'
+                    status: row.Status || 'OKBUYER'
                 })).filter(item => item.code); // Filter out empty product codes
                 resolve(mapped);
             },
@@ -358,26 +411,56 @@ export const fetchPlmStaging = async () => {
     });
 };
 
+export const runGlobalSync = (payload) => request('/sync-product-master', {
+    method: 'POST',
+    body: JSON.stringify(payload)
+});
+
 export const fetchProductMaster = async () => {
     const csvUrl = 'https://docs.google.com/spreadsheets/d/1TaqgVyZHO2VWTSxFI0vWVVJ08MGKAw1ZgpajgZWcFUM/export?format=csv&gid=903700047';
-    const response = await fetch(csvUrl);
-    const csvData = await response.text();
-    return new Promise((resolve, reject) => {
-        Papa.parse(csvData, {
-            header: true,
-            skipEmptyLines: true,
-            complete: (results) => {
-                const mapped = results.data.map((row) => ({
-                    sku: row.Product_Code,
-                    name: row.Product_Description || 'No Description',
-                    category: row.Family_Group_Code || row.Department || 'General',
-                    vendor: row.Supplier_Name || 'Mustang Corp'
-                })).filter(item => item.sku);
-                resolve(mapped);
-            },
-            error: (err) => reject(err)
+    try {
+        const response = await fetch(csvUrl);
+        const csvData = await response.text();
+        return new Promise((resolve, reject) => {
+            Papa.parse(csvData, {
+                header: true,
+                skipEmptyLines: true,
+                complete: async (results) => {
+                    let mapped = results.data
+                        .map((row) => ({
+                            sku: row.Product_Code,
+                            name: row.Product_Description || 'No Description',
+                            category: row.Family_Group_Code || row.Department || 'General',
+                            vendor: row.Supplier_Name || 'Mustang Corp'
+                        }))
+                        .filter(item => item.sku && item.sku.trim() !== "");
+
+                    // FALLBACK: If Master is empty, attempt to preview from PLM Staging
+                    if (mapped.length === 0) {
+                        console.warn("[ORION] Product Master empty. Falling back to PLM Staging preview...");
+                        try {
+                            const plmStaging = await fetchPlmStaging();
+                            mapped = plmStaging
+                                .filter(item => item.status === 'OKBUYER' || !item.status) // Show OKBUYER or all if none marked
+                                .map(item => ({
+                                    sku: item.code,
+                                    name: item.desc,
+                                    category: "Imported from PLM",
+                                    vendor: "Mustang Corp" // Demo Default
+                                }));
+                        } catch (e) {
+                            console.error("PLM Fallback failed:", e);
+                        }
+                    }
+                    resolve(mapped);
+                },
+                error: (err) => reject(err)
+            });
         });
-    });
+    } catch (err) {
+        console.error("Failed to fetch Product Master:", err);
+        return [];
+    }
 };
 
 export const fetchVolumeExtract = async () => {
@@ -430,16 +513,7 @@ export const triggerMonthlySync = () =>
 export const callStatusManager = (payload) => request('/status-manager', { method: 'POST', body: JSON.stringify(payload) });
 export const receiveOkqc = (barcode) => request('/receive-okqc', { method: 'POST', body: JSON.stringify({ barcode }) });
 
-export const confirmProduction = (planId, qty, date) =>
-    request('/production/confirm', {
-        method: 'POST',
-        body: JSON.stringify({
-            Plan_ID: planId,
-            Trigger_Qty: qty,
-            FRI_Date: date,
-            Action_Context: 'SUPPLIER_CONFIRM'
-        })
-    });
+
 
 export const splitProduction = (planId, splits) =>
     request('/production/split', {
@@ -541,7 +615,8 @@ export const runLogisticsFactory = () =>
 export const generateProductionPlan = () =>
     calculateOrders('GENERATE');
 
-export const confirmProductionOrder = (planId, triggerQty, friDate) =>
+// 1.4.3 Confirmation & EDI Transmission
+export const confirmProduction = (planId, triggerQty, friDate) =>
     request('/confirm-production-order', {
         method: 'POST',
         body: JSON.stringify({
@@ -583,4 +658,36 @@ export const approveSplitShipment = (shipmentId) =>
             Shipment_ID: shipmentId,
             Action: 'APPROVE_SPLIT'
         })
+    });
+
+// 1.6 Shipment Negotiation & Finalization
+export const updateShipmentStatus = (shipmentId, action, note = "") =>
+    request('/update-shipment-status', {
+        method: 'POST',
+        body: JSON.stringify({
+            Shipment_ID: shipmentId,
+            Action: action,
+            Note: note
+        })
+    });
+
+export const finalizeShipmentBooking = (shipmentId) =>
+    request('/finalize-shipment-booking', {
+        method: 'POST',
+        body: JSON.stringify({
+            Shipment_ID: shipmentId
+        })
+    });
+
+// 1.6 Contextual Chat Service
+export const fetchChatHistory = (contextId) =>
+    request('/chat-history', {
+        method: 'POST',
+        body: JSON.stringify({ context_id: contextId })
+    });
+
+export const sendChatMessage = (payload) =>
+    request('/send-message', {
+        method: 'POST',
+        body: JSON.stringify(payload)
     });

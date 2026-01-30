@@ -71,45 +71,55 @@ const SupplyParameter = () => {
                 </div>
             </div>
 
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-                <ParameterCard title="Lead Times" icon={Clock} description="Time-based parameters for ETD calculation." color="blue">
-                    <InputGroup label="Plan Recv → Order Create" suffix="Days" value={params.receivingToOrder} onChange={(v) => setParams({ ...params, receivingToOrder: v })} />
-                    <InputGroup label="Order Create → Finish" suffix="Days" value={params.orderToFinishing} onChange={(v) => setParams({ ...params, orderToFinishing: v })} />
-                    <InputGroup label="Finish → Order Frozen" suffix="Days" value={params.finishingToFrozen} onChange={(v) => setParams({ ...params, finishingToFrozen: v })} />
-                    <InputGroup label="Order Frozen → ETD" suffix="Days" value={params.frozenToEtd} onChange={(v) => setParams({ ...params, frozenToEtd: v })} />
-                </ParameterCard>
+            {/* Step 1.2.1: Configuration Section */}
+            <div className="space-y-6">
+                <div className="flex items-center gap-4 px-6">
+                    <div className="w-1.5 h-6 bg-blue-600 rounded-full"></div>
+                    <h3 className="text-xl font-black text-slate-800 uppercase tracking-tight">
+                        Step 1.2.1: GS Ops gatekeeping and centralized table configuration
+                    </h3>
+                </div>
 
-                <ParameterCard title="Inventory & Qty" icon={Shield} description="Safety stock and buffer logic." color="emerald">
-                    <InputGroup label="Safety Stock" suffix="Weeks" value={params.safetyStock} onChange={(v) => setParams({ ...params, safetyStock: v })} />
-                    <div className="space-y-1.5">
-                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Buffer Stock Logic</label>
-                        <select className="w-full bg-slate-50 border-2 border-slate-50 rounded-xl p-4 text-sm font-black text-slate-900 outline-none disabled:opacity-60" value={params.bufferLogic} disabled={isSaved} onChange={(e) => setParams({ ...params, bufferLogic: e.target.value })}>
-                            <option value="1 Month Buffer">1 Month Buffer</option>
-                            <option value="Fixed 4 Weeks">Fixed 4 Weeks</option>
-                        </select>
-                    </div>
-                    <InputGroup label="Min Order Qty (MOQ)" suffix="Units" value={params.moq} onChange={(v) => setParams({ ...params, moq: v })} />
-                    <InputGroup label="Min Order Amt (MOA)" suffix="USD" value={params.moa} onChange={(v) => setParams({ ...params, moa: v })} />
-                </ParameterCard>
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                    <ParameterCard title="Lead Times" icon={Clock} description="Time-based parameters for ETD calculation." color="blue">
+                        <InputGroup label="Plan Recv → Order Create" suffix="Days" value={params.receivingToOrder} onChange={(v) => setParams({ ...params, receivingToOrder: v })} />
+                        <InputGroup label="Order Create → Finish" suffix="Days" value={params.orderToFinishing} onChange={(v) => setParams({ ...params, orderToFinishing: v })} />
+                        <InputGroup label="Finish → Order Frozen" suffix="Days" value={params.finishingToFrozen} onChange={(v) => setParams({ ...params, finishingToFrozen: v })} />
+                        <InputGroup label="Order Frozen → ETD" suffix="Days" value={params.frozenToEtd} onChange={(v) => setParams({ ...params, frozenToEtd: v })} />
+                    </ParameterCard>
 
-                <ParameterCard title="Administrative" icon={Calendar} description="Calendars and frequencies." color="amber">
-                    <div className="space-y-1.5">
-                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Holiday Calendar</label>
-                        <select className="w-full bg-slate-50 border-2 border-slate-50 rounded-xl p-4 text-sm font-black text-slate-900 outline-none disabled:opacity-60" value={params.holidayCal} disabled={isSaved} onChange={(e) => setParams({ ...params, holidayCal: e.target.value })}>
-                            <option value="CN_HK_2026">China/HK 2026</option>
-                        </select>
-                    </div>
-                    <div className="space-y-1.5">
-                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Shipment Frequency</label>
-                        <div className="grid grid-cols-2 gap-3">
-                            {["Weekly", "Bi-Weekly"].map(f => (
-                                <button key={f} disabled={isSaved} onClick={() => setParams({ ...params, shipmentFreq: f })} className={clsx("py-3 rounded-xl text-[10px] font-black uppercase", params.shipmentFreq === f ? "bg-amber-100 text-amber-700 ring-2 ring-amber-500" : "bg-slate-50 text-slate-400")}>
-                                    {f}
-                                </button>
-                            ))}
+                    <ParameterCard title="Inventory & Qty" icon={Shield} description="Safety stock and buffer logic." color="emerald">
+                        <InputGroup label="Safety Stock" suffix="Weeks" value={params.safetyStock} onChange={(v) => setParams({ ...params, safetyStock: v })} />
+                        <div className="space-y-1.5">
+                            <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Buffer Stock Logic</label>
+                            <select className="w-full bg-slate-50 border-2 border-slate-50 rounded-xl p-4 text-sm font-black text-slate-900 outline-none disabled:opacity-60" value={params.bufferLogic} disabled={isSaved} onChange={(e) => setParams({ ...params, bufferLogic: e.target.value })}>
+                                <option value="1 Month Buffer">1 Month Buffer</option>
+                                <option value="Fixed 4 Weeks">Fixed 4 Weeks</option>
+                            </select>
                         </div>
-                    </div>
-                </ParameterCard>
+                        <InputGroup label="Min Order Qty (MOQ)" suffix="Units" value={params.moq} onChange={(v) => setParams({ ...params, moq: v })} />
+                        <InputGroup label="Min Order Amt (MOA)" suffix="USD" value={params.moa} onChange={(v) => setParams({ ...params, moa: v })} />
+                    </ParameterCard>
+
+                    <ParameterCard title="Administrative" icon={Calendar} description="Calendars and frequencies." color="amber">
+                        <div className="space-y-1.5">
+                            <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Holiday Calendar</label>
+                            <select className="w-full bg-slate-50 border-2 border-slate-50 rounded-xl p-4 text-sm font-black text-slate-900 outline-none disabled:opacity-60" value={params.holidayCal} disabled={isSaved} onChange={(e) => setParams({ ...params, holidayCal: e.target.value })}>
+                                <option value="CN_HK_2026">China/HK 2026</option>
+                            </select>
+                        </div>
+                        <div className="space-y-1.5">
+                            <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Shipment Frequency</label>
+                            <div className="grid grid-cols-2 gap-3">
+                                {["Weekly", "Bi-Weekly"].map(f => (
+                                    <button key={f} disabled={isSaved} onClick={() => setParams({ ...params, shipmentFreq: f })} className={clsx("py-3 rounded-xl text-[10px] font-black uppercase", params.shipmentFreq === f ? "bg-amber-100 text-amber-700 ring-2 ring-amber-500" : "bg-slate-50 text-slate-400")}>
+                                        {f}
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+                    </ParameterCard>
+                </div>
             </div>
 
             <SyncBridge onSyncComplete={(type) => {
