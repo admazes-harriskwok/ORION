@@ -662,7 +662,7 @@ export const approveSplitShipment = (shipmentId) =>
 
 // 1.6 Shipment Negotiation & Finalization
 export const updateShipmentStatus = (shipmentId, action, note = "") =>
-    request('/update-shipment-status', {
+    request('/webhook/update-shipment-status', {
         method: 'POST',
         body: JSON.stringify({
             Shipment_ID: shipmentId,
@@ -672,10 +672,11 @@ export const updateShipmentStatus = (shipmentId, action, note = "") =>
     });
 
 export const finalizeShipmentBooking = (shipmentId) =>
-    request('/finalize-shipment-booking', {
+    request('/webhook/update-shipment-status', {
         method: 'POST',
         body: JSON.stringify({
-            Shipment_ID: shipmentId
+            Shipment_ID: shipmentId,
+            Action: 'BOOK'
         })
     });
 

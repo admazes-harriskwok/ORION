@@ -93,7 +93,31 @@ const ShipmentManager = () => {
             setModalConfig(null);
             setModalNote("");
         } catch (err) {
-            alert("❌ Action failed: " + err.message);
+            console.error("Action failed", err);
+            const msg = err.message.includes("DOCTYPE") ? "Server Error (500): The backend service is currently unavailable." : err.message;
+            alert("❌ Action failed: " + msg);
+        } finally {
+            setProcessingId(null);
+        }
+    };
+
+    const handleBatchAccept = async () => {
+        if (!confirm("Are you sure you want to ACCEPT all visible proposals? This will generate EDI 940s for all orders.")) return;
+
+        setProcessingId('BATCH');
+        try {
+            // Process sequentially to avoid overwhelming the webhook
+            for (const row of filteredProposals) {
+                const shipmentId = row.Shipment_ID || row.Group_ID || row.Order_No;
+                if (shipmentId) {
+                    await finalizeShipmentBooking(shipmentId);
+                }
+            }
+            alert("✅ Batch Acceptance Complete!");
+            await loadData();
+        } catch (err) {
+            console.error(err);
+            alert("❌ Batch Process Interrupted: " + err.message);
         } finally {
             setProcessingId(null);
         }
@@ -217,6 +241,16 @@ const ShipmentManager = () => {
                                     className="bg-indigo-600 text-white px-6 py-2 rounded-xl font-black text-[10px] uppercase tracking-widest hover:bg-indigo-700 transition-all shadow-md active:scale-95"
                                 >
                                     Release All to Supplier
+                                </button>
+                            )}
+                            {role === 'SUPPLIER' && filteredProposals.length > 0 && (
+                                <button
+                                    onClick={handleBatchAccept}
+                                    disabled={processingId === 'BATCH'}
+                                    className="bg-emerald-600 text-white px-6 py-2 rounded-xl font-black text-[10px] uppercase tracking-widest hover:bg-emerald-700 transition-all shadow-md active:scale-95 flex items-center gap-2"
+                                >
+                                    {processingId === 'BATCH' ? <RefreshCw size={12} className="animate-spin" /> : <CheckCircle size={12} />}
+                                    Accept All ({filteredProposals.length})
                                 </button>
                             )}
                             <button
