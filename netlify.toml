@@ -1,0 +1,20 @@
+[build]
+  command = "npm run build"
+  publish = "dist"
+
+# --- RULE 1: API PROXY (Must come first) ---
+# Redirects calls from /api-proxy/* to your n8n Webhook URL
+# Example: /api-proxy/dashboard-stats -> https://n8n.yoursite.com/webhook/dashboard-stats
+[[redirects]]
+  from = "/api-proxy/*"
+  to = "https://n8n-test.admazes.com/webhook/:splat"
+  status = 200
+  force = true
+  headers = {X-From = "Netlify"}
+
+# --- RULE 2: REACT ROUTER (SPA Fallback) ---
+# Ensures refreshing pages like /shipments doesn't give a 404
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
