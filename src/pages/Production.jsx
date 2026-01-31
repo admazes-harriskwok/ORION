@@ -85,12 +85,58 @@ const Production = () => {
 
             if (remainingPending === 0) {
                 const allConfirmed = updatedOrders.filter(o => o.status === 'CONFIRMED_RPO').length;
-                if (allConfirmed > 0 && confirm(`✅ ALL ORDERS CONFIRMED!\n\n${allConfirmed} orders are now in CONFIRMED_RPO status.\n\nWould you like to proceed to the Inventory Management page (Step 1.5)?`)) {
-                    navigate('/inventory');
+                if (allConfirmed > 0) {
+                    localStorage.setItem('prereq_ordersConfirmed', 'true');
+                    if (confirm(`✅ ALL ORDERS CONFIRMED!\n\n${allConfirmed} orders are now in CONFIRMED_RPO status.\n\nWould you like to proceed to the Inventory Management page (Step 1.5)?`)) {
+                        navigate('/inventory');
+                    }
                 }
             }
         } catch (err) {
             alert("Confirmation failed: " + err.message);
+        } finally {
+            setIsProcessing(false);
+        }
+    };
+
+    const handleBatchSupplierConfirm = async () => {
+        // Filter for orders that are in PROPOSAL state only
+        const pendingOrders = orders.filter(o => o.status === 'PROPOSAL' || o.status === 'PENDING_APPROVAL');
+
+        if (pendingOrders.length === 0) {
+            alert("No pending orders to confirm.");
+            return;
+        }
+
+        if (!confirm(`DEMO BATCH CONFIRM: Auto-fill and confirm ${pendingOrders.length} orders?\n\n(Missing Trigger Qty & FRI Dates will be auto-generated)`)) return;
+
+        setIsProcessing(true);
+        try {
+            // For the demo, we use the bulk simulation endpoint to auto-fill missing data
+            await calculateOrders("SIMULATE_INPUTS");
+
+            alert(`SUCCESS: ${pendingOrders.length} Orders Confirmed and Sent to Ops.`);
+
+            // Client side optimistic update
+            setOrders(prev => prev.map(o => {
+                if (pendingOrders.find(v => v.planId === o.planId)) {
+                    return {
+                        ...o,
+                        status: 'CONFIRMED_RPO',
+                        // Auto-fill defaults if missing for smooth demo
+                        triggerQty: o.triggerQty > 0 ? o.triggerQty : o.proposedQty,
+                        friDate: o.friDate || '2026-03-20',
+                        prodStatus: 'Confirmed',
+                        pssStatus: 'New',
+                        triggerStatus: true
+                    };
+                }
+                return o;
+            }));
+
+            setTimeout(() => loadData(false), 2000);
+        } catch (err) {
+            alert("Batch Confirm Failed: " + err.message);
         } finally {
             setIsProcessing(false);
         }
@@ -112,7 +158,17 @@ const Production = () => {
             // Optimistic Client-Side Update (Immediate UI Feedback)
             setOrders(prevOrders => prevOrders.map(o => {
                 if (o.status === 'PROPOSAL' || o.status === 'PENDING_APPROVAL') {
-                    return { ...o, status: 'CONFIRMED_RPO', triggerQty: o.proposedQty, friDate: '2026-03-20' }; // Defaulting values for demo visual
+                    // Update main status and new detailed statuses
+                    return {
+                        ...o,
+                        status: 'CONFIRMED_RPO',
+                        triggerQty: o.proposedQty,
+                        friDate: '2026-03-20',
+                        prodStatus: 'Confirmed',
+                        pssStatus: 'Transferred',
+                        friStatus: 'Not Received',
+                        triggerStatus: true
+                    };
                 }
                 return o;
             }));
@@ -129,6 +185,7 @@ const Production = () => {
             setTimeout(() => setShowSyncBanner(false), 15000);
 
             setShowNextStep(true);
+            localStorage.setItem('prereq_ordersConfirmed', 'true');
             alert(`Bulk Confirmation Complete: ${pendingCount} Orders moved to CONFIRMED_RPO status.\n\nNote: Data will auto-refresh over the next 12 seconds to sync with the backend.\n\nBackend Response: ${JSON.stringify(response)}`);
         } catch (err) {
             console.error('[BULK SIMULATION] Error:', err);
@@ -330,10 +387,14 @@ const Production = () => {
                         )}
                         {role === 'SUPPLIER' && (
                             <button
-                                onClick={handleBulkSimulation}
-                                className="bg-emerald-600 text-white px-6 py-3 rounded-2xl font-black text-[10px] uppercase tracking-widest shadow-lg hover:bg-emerald-500 transition-all active:scale-95 flex items-center gap-2 animate-in slide-in-from-right"
+                                onClick={handleBatchSupplierConfirm}
+                                disabled={orders.filter(o => o.status === 'PROPOSAL' || o.status === 'PENDING_APPROVAL').length === 0}
+                                className="bg-emerald-600 text-white px-6 py-3 rounded-2xl font-black text-[10px] uppercase tracking-widest shadow-lg hover:bg-emerald-500 transition-all active:scale-95 flex items-center gap-2 animate-in slide-in-from-right disabled:opacity-50 disabled:grayscale disabled:pointer-events-none"
                             >
-                                <CheckSquare size={14} /> Batch Confirm All Proposals
+                                <CheckSquare size={14} />
+                                {orders.filter(o => o.status === 'PROPOSAL' || o.status === 'PENDING_APPROVAL').length > 0
+                                    ? "Batch Confirm (Demo)"
+                                    : "All Orders Confirmed"}
                             </button>
                         )}
                     </div>
@@ -349,10 +410,14 @@ const Production = () => {
                                             <th className="p-8 text-[10px] font-black text-slate-400 uppercase tracking-widest">POD</th>
                                         </>
                                     )}
+                                    <th className="p-8 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">Trigger</th>
                                     <th className="p-8 text-[10px] font-black text-slate-400 uppercase tracking-widest">Product</th>
                                     <th className="p-8 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">Proposed Qty</th>
                                     <th className="p-8 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">Trigger Qty</th>
                                     <th className="p-8 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">FRI Date</th>
+                                    <th className="p-8 text-[10px] font-black text-slate-400 uppercase tracking-widest">Prod. Status</th>
+                                    <th className="p-8 text-[10px] font-black text-slate-400 uppercase tracking-widest">PSS Status</th>
+                                    <th className="p-8 text-[10px] font-black text-slate-400 uppercase tracking-widest">FRI Status</th>
                                     {role === 'OPS' && <th className="p-8 text-[10px] font-black text-slate-400 uppercase tracking-widest text-right">Pricing</th>}
                                     <th className="p-8 text-[10px] font-black text-slate-400 uppercase tracking-widest text-right pr-10">Action</th>
                                 </tr>
@@ -364,7 +429,6 @@ const Production = () => {
                                         <tr key={idx} className={clsx("hover:bg-slate-50/50 transition-all", isConfirmed && "bg-emerald-50/30")}>
                                             <td className="p-8 font-black text-slate-900 text-sm">
                                                 {row.planId}
-                                                {isConfirmed && <span className="ml-2 px-2 py-0.5 bg-emerald-500 text-white text-[8px] rounded font-black tracking-widest uppercase align-middle">Confirmed</span>}
                                             </td>
                                             {role === 'OPS' && (
                                                 <>
@@ -372,6 +436,15 @@ const Production = () => {
                                                     <td className="p-8 text-xs font-bold text-slate-500">{row.pod}</td>
                                                 </>
                                             )}
+                                            {/* Trigger Status */}
+                                            <td className="p-8 text-center">
+                                                {row.triggerStatus ? (
+                                                    <div className="w-6 h-6 bg-emerald-100 text-emerald-600 rounded flex items-center justify-center mx-auto">
+                                                        <CheckSquare size={14} />
+                                                    </div>
+                                                ) : <div className="w-6 h-6 border border-slate-200 rounded mx-auto" />}
+                                            </td>
+
                                             <td className="p-8">
                                                 <p className="font-black text-blue-600 text-sm">{row.productCode}</p>
                                             </td>
@@ -432,6 +505,26 @@ const Production = () => {
                                                     <span className="font-bold text-slate-600">{row.friDate}</span>
                                                 )}
                                             </td>
+
+                                            {/* Status Columns */}
+                                            <td className="p-8">
+                                                <span className={clsx("text-[10px] font-black uppercase tracking-widest px-2 py-1 rounded",
+                                                    row.prodStatus === 'Confirmed' ? "bg-emerald-100 text-emerald-600" : "bg-slate-100 text-slate-400")}>
+                                                    {row.prodStatus || 'New'}
+                                                </span>
+                                            </td>
+                                            <td className="p-8">
+                                                <span className={clsx("text-[10px] font-black uppercase tracking-widest px-2 py-1 rounded",
+                                                    row.pssStatus === 'Transferred' ? "bg-blue-100 text-blue-600" : "bg-slate-100 text-slate-400")}>
+                                                    {row.pssStatus || 'New'}
+                                                </span>
+                                            </td>
+                                            <td className="p-8">
+                                                <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">
+                                                    {row.friStatus || 'Not Received'}
+                                                </span>
+                                            </td>
+
                                             {role === 'OPS' && <td className="p-8 text-right font-bold text-slate-600">${row.price?.toFixed(2)}</td>}
                                             <td className="p-8 text-right pr-10">
                                                 {role === 'SUPPLIER' && !isConfirmed ? (

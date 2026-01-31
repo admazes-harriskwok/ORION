@@ -122,7 +122,7 @@ const SupplyParameter = () => {
                 </div>
             </div>
 
-            <SyncBridge onSyncComplete={(type) => {
+            <SyncBridge showPull={false} onSyncComplete={(type) => {
                 if (type === 'PUSH') setIsSaved(true);
             }} />
 

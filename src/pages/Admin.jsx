@@ -119,7 +119,9 @@ const Admin = () => {
                                     onClick={async () => {
                                         if (!window.confirm("WARNING: This will delete all demo data. Continue?")) return;
                                         try {
+                                            const { clearLocalWorkflowState } = await import('../utils/api');
                                             await fetch('https://n8n-test.admazes.com/webhook/reset-demo-data', { method: 'POST' });
+                                            clearLocalWorkflowState();
                                             alert("System Reset Complete. Ready for Demo.");
                                             window.location.reload();
                                         } catch (error) {

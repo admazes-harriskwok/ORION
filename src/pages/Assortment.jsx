@@ -11,7 +11,10 @@ const Assortment = () => {
     const [masterData, setMasterData] = useState([]);
     const [loading, setLoading] = useState(true);
     const [isSaving, setIsSaving] = useState(false);
-    const [selectedSkus, setSelectedSkus] = useState([]);
+    const [selectedSkus, setSelectedSkus] = useState(() => {
+        const saved = localStorage.getItem('orion_registered_skus');
+        return saved ? JSON.parse(saved) : [];
+    });
     const [isConfirmed, setIsConfirmed] = useState(localStorage.getItem('prereq_assortmentConfirmed') === 'true');
 
     // 1.1.1 Fetch on load
@@ -22,6 +25,9 @@ const Assortment = () => {
                 const result = await fetchProductMaster();
                 const dataArray = Array.isArray(result) ? result : (result?.data && Array.isArray(result.data) ? result.data : []);
                 setMasterData(dataArray);
+
+                // If it's confirmed, but selectedSkus is empty, try to fallback to all if it was a "select all" confirm?
+                // Actually, best is to just rely on localStorage for the persistent selection
             } catch (err) {
                 console.error("Failed to load Product Master:", err);
                 setMasterData([]);
@@ -77,6 +83,7 @@ const Assortment = () => {
         try {
             await registerAssortment(selectedSkus);
             localStorage.setItem('prereq_assortmentConfirmed', 'true');
+            localStorage.setItem('orion_registered_skus', JSON.stringify(selectedSkus));
             setIsConfirmed(true);
             if (confirm("SUCCESS: Assortment Registered! '1.2 Supply Parameter' tab unlocked. Proceed?")) {
                 navigate('/supply-parameter');
@@ -91,6 +98,7 @@ const Assortment = () => {
     const handleRetry = () => {
         if (confirm("RETRY STEP: Clear confirmed assortment?")) {
             localStorage.removeItem('prereq_assortmentConfirmed');
+            localStorage.removeItem('orion_registered_skus');
             setIsConfirmed(false);
             setSelectedSkus([]);
         }
@@ -215,7 +223,7 @@ const Assortment = () => {
                         </thead>
                         <tbody className="divide-y divide-slate-50">
                             {filteredData.map((item) => {
-                                const active = selectedSkus.includes(item.sku) || isConfirmed;
+                                const active = selectedSkus.includes(item.sku);
                                 return (
                                     <tr
                                         key={item.sku}

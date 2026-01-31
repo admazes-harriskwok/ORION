@@ -102,18 +102,7 @@ const VolumeForecast = () => {
             </div>
 
             {/* Step Completion Card - MOVED ABOVE TABLE */}
-            {extractComplete && (
-                <div className="bg-blue-600 rounded-[3rem] p-10 text-white shadow-xl flex items-center justify-between group cursor-pointer animate-in zoom-in" onClick={() => navigate('/production')}>
-                    <div className="space-y-1">
-                        <h4 className="text-xl font-black uppercase tracking-tight">Step 1.3.4 Complete</h4>
-                        <p className="text-blue-100 text-sm font-medium">Volumes calculated. Proceed to Production for official booking.</p>
-                    </div>
-                    <div className="flex items-center gap-4 bg-white text-blue-600 px-8 py-4 rounded-2xl group-hover:bg-blue-50 transition-all">
-                        <span className="text-xs font-black uppercase tracking-[0.2em]">Next: Production</span>
-                        <ChevronRight size={20} />
-                    </div>
-                </div>
-            )}
+
 
             {/* Data View */}
             {isLoading ? (
@@ -172,6 +161,20 @@ const VolumeForecast = () => {
                     <Database size={48} className="text-slate-200 mb-6" />
                     <h4 className="text-xl font-black text-slate-400 uppercase tracking-tight">No Extraction Data</h4>
                     <p className="text-slate-400 text-sm mt-2">Trigger the volume extract above to generate the system view.</p>
+                </div>
+            )}
+
+            {/* Step Completion Card - MOVED TO BOTTOM */}
+            {extractComplete && (
+                <div className="bg-blue-600 rounded-[3rem] p-10 text-white shadow-xl flex items-center justify-between group cursor-pointer animate-in zoom-in" onClick={() => navigate('/production')}>
+                    <div className="space-y-1">
+                        <h4 className="text-xl font-black uppercase tracking-tight">Step 1.3.4 Complete</h4>
+                        <p className="text-blue-100 text-sm font-medium">Volumes calculated. Proceed to Production for official booking.</p>
+                    </div>
+                    <div className="flex items-center gap-4 bg-white text-blue-600 px-8 py-4 rounded-2xl group-hover:bg-blue-50 transition-all">
+                        <span className="text-xs font-black uppercase tracking-[0.2em]">Next: Production</span>
+                        <ChevronRight size={20} />
+                    </div>
                 </div>
             )}
         </div>

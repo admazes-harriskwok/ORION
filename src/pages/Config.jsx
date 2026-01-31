@@ -142,6 +142,27 @@ const Config = () => {
         }
     };
 
+    const handleResetExecutions = () => {
+        if (confirm("RESET EXECUTION STATES: Reset all 'Run' buttons (0.0.5, 1.2, 1.3, 1.4) to initial state?")) {
+            // Step 0.0.5
+            localStorage.removeItem('prereq_masterDataSynced');
+            // Step 1.1
+            localStorage.removeItem('prereq_assortmentConfirmed');
+            // Step 1.2 / 1.3 / 1.4 Bridge
+            localStorage.removeItem('bridge_step1');
+            localStorage.removeItem('bridge_step2');
+            localStorage.removeItem('bridge_step3');
+            localStorage.removeItem('prereq_paramsSaved');
+            localStorage.removeItem('prereq_planActive');
+            localStorage.removeItem('prereq_ordersConfirmed');
+            localStorage.removeItem('prereq_inventoryUpdated');
+            localStorage.removeItem('prereq_shipmentGenerated');
+
+            setIsSynced(false);
+            window.location.reload();
+        }
+    };
+
     return (
         <div className="space-y-10 animate-in fade-in duration-500 pb-20">
             <div className="flex justify-between items-end bg-white p-10 rounded-[3rem] border border-slate-100 shadow-sm relative overflow-hidden">
@@ -155,6 +176,12 @@ const Config = () => {
                     <p className="text-slate-500 font-medium font-sans italic">System Setup & Master Data Initialization</p>
                 </div>
                 <div className="flex gap-4 relative z-10">
+                    <button
+                        onClick={handleResetExecutions}
+                        className="px-4 py-2 bg-slate-50 text-slate-400 text-[10px] font-black uppercase rounded-xl hover:bg-blue-50 hover:text-blue-600 transition-all flex items-center gap-2"
+                    >
+                        <RefreshCw size={12} /> Reset Executions
+                    </button>
                     <button
                         onClick={handleRetryStep}
                         className="px-4 py-2 bg-slate-50 text-slate-400 text-[10px] font-black uppercase rounded-xl hover:bg-amber-50 hover:text-amber-600 transition-all flex items-center gap-2"

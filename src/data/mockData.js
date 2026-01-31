@@ -1,30 +1,147 @@
 export const mockDashboardStats = {
-    pending_production: 5,
-    shipment_negotiations: 3,
-    container_utilization: 88,
+    // Key Performance Indicators
+    pending_production: 247,
+    shipment_negotiations: 18,
+    container_utilization: 87,
+
+    // System Alerts & Anomalies
     alerts: [
-        { id: 1, type: 'danger', msg: 'Order #PO-1002: Over-production detected (+15%)', time: '1h ago' },
-        { id: 2, type: 'warning', msg: 'Shipment #SH-8802: ETD delay predicted (Typhoon Alert)', time: '3h ago' }
+        {
+            id: 'ALT-001',
+            type: 'danger',
+            msg: 'Critical: 3 shipments require immediate carrier confirmation (ETD < 48hrs)',
+            time: '12 min ago'
+        },
+        {
+            id: 'ALT-002',
+            type: 'warning',
+            msg: 'Production delay detected: FRI dates for 15 orders pushed by 5-7 days',
+            time: '1 hr ago'
+        },
+        {
+            id: 'ALT-003',
+            type: 'warning',
+            msg: 'Inventory alert: Stock levels for DY103585 below safety threshold at WH-EMEA',
+            time: '2 hrs ago'
+        },
+        {
+            id: 'ALT-004',
+            type: 'danger',
+            msg: 'Over-production detected: Supplier MUSTN triggered 22% above proposed qty for 8 SKUs',
+            time: '3 hrs ago'
+        },
+        {
+            id: 'ALT-005',
+            type: 'warning',
+            msg: 'Container utilization suboptimal: Shipment SHP-2026-0142 at 64% capacity',
+            time: '5 hrs ago'
+        },
+        {
+            id: 'ALT-006',
+            type: 'warning',
+            msg: 'EDI transmission pending: 12 RPO confirmations awaiting PSS sync',
+            time: '6 hrs ago'
+        }
     ],
+
+    // Live Activity Feed
     activity: [
-        { id: 1, user: 'Mustang Corp', action: 'Modified Shipment #SH-8804', time: '10 mins ago' },
-        { id: 2, user: 'Ops Manager', action: 'Validated Production for #PO-1003', time: '45 mins ago' },
-        { id: 3, user: 'Mustang Corp', action: 'Confirmed Production #PO-1001', time: '2 hours ago' },
-        { id: 4, user: 'System', action: 'Automated Supply Plan Ingestion Complete', time: '5 hours ago' }
+        {
+            id: 'ACT-001',
+            user: 'OPS-MANAGER',
+            action: 'Validated shipment modification for SHP-2026-0156 (PBSUP → OKSUP)',
+            time: '5 min ago'
+        },
+        {
+            id: 'ACT-002',
+            user: 'SUPPLIER-MUSTN',
+            action: 'Batch confirmed 47 production orders with auto-filled FRI dates',
+            time: '18 min ago'
+        },
+        {
+            id: 'ACT-003',
+            user: 'SYSTEM',
+            action: 'Volume extraction completed: 1,350 forecast records synced to GS Tool',
+            time: '32 min ago'
+        },
+        {
+            id: 'ACT-004',
+            user: 'OPS-MANAGER',
+            action: 'Triggered monthly supply plan ingest (V_202601)',
+            time: '1 hr ago'
+        },
+        {
+            id: 'ACT-005',
+            user: 'SUPPLIER-VEGA',
+            action: 'Submitted modification request for shipment SHP-2026-0148 (Qty: 2400 → 2650)',
+            time: '1 hr ago'
+        },
+        {
+            id: 'ACT-006',
+            user: 'SYSTEM',
+            action: 'EDI 850 transmitted for 127 confirmed RPOs to Group PSS',
+            time: '2 hrs ago'
+        },
+        {
+            id: 'ACT-007',
+            user: 'OPS-MANAGER',
+            action: 'Registered assortment: 156 SKUs locked for collection SS26',
+            time: '3 hrs ago'
+        },
+        {
+            id: 'ACT-008',
+            user: 'SUPPLIER-ATLAS',
+            action: 'Updated inventory levels: +850 units for DY94127 at POL-SHENZHEN',
+            time: '4 hrs ago'
+        },
+        {
+            id: 'ACT-009',
+            user: 'SYSTEM',
+            action: 'Auto-generated 18 shipment proposals from confirmed production orders',
+            time: '5 hrs ago'
+        },
+        {
+            id: 'ACT-010',
+            user: 'OPS-MANAGER',
+            action: 'Executed global sync: Product Master updated with 1,247 records from PLM',
+            time: '6 hrs ago'
+        }
     ]
 };
 
 export const mockSupplyPlan = [
-    { planId: 'PO-1001', productCode: 'KIT-7722', client: 'Carrefour France', country: 'FR', supplier: 'Mustang Corp', orderQty: 500, previousQty: 480, friDate: '2026-02-15', status: 'PROPOSAL', netReq: 500 },
-    { planId: 'PO-1002', productCode: 'HH-9921', client: 'Carrefour Spain', country: 'ES', supplier: 'Mustang Corp', orderQty: 1200, previousQty: 1200, friDate: '2026-02-18', status: 'NEGOTIATION_PENDING', proposedQty: 1100, proposedDate: '2026-03-08', netReq: 1000 },
-    { planId: 'PO-1003', productCode: 'TX-4455', client: 'Carrefour Italy', country: 'IT', supplier: 'Mustang Corp', orderQty: 800, previousQty: 850, friDate: '2026-02-20', status: 'BOOKED', netReq: 800 },
-    { planId: 'PO-1004', productCode: 'BK-1122', client: 'Carrefour France', country: 'FR', supplier: 'Global Logistics', orderQty: 300, previousQty: 300, friDate: '2026-02-10', status: 'PROPOSAL', netReq: 300 },
-    { planId: 'PO-1005', productCode: 'LJ-3344', client: 'Carrefour Spain', country: 'ES', supplier: 'Mustang Corp', orderQty: 1500, previousQty: 1400, friDate: '2026-02-25', status: 'PROPOSAL', netReq: 1500 },
-];
-
-export const mockInventory = [
-    { product: 'KIT-7722', okqc: 450, physical: 440, lastUpdated: '2026-01-20 14:30', updatedBy: 'System' },
-    { product: 'HH-9921', okqc: 1200, physical: 1200, lastUpdated: '2026-01-21 09:15', updatedBy: 'John Doe' },
-    { product: 'TX-4455', okqc: 800, physical: 810, lastUpdated: '2026-01-22 11:00', updatedBy: 'Admin' },
-    { product: 'LJ-3344', okqc: 2000, physical: 2000, lastUpdated: '2026-01-19 16:45', updatedBy: 'Jane Smith' },
+    {
+        planId: 'PLAN-001',
+        version: '202512',
+        lastUpdate: '2026-01-15',
+        pssClient: 'CLI-ABC',
+        pssWarehouse: 'WH-01',
+        productBarcode: '1234567890123',
+        pssSupplier: 'SUP-XYZ',
+        client: 'CLI-ABC',
+        productCode: 'PROD-101',
+        productName: 'Wireless Headphones',
+        country: 'USA',
+        netReq: 5000,
+        friDate: '2026-03-01',
+        status: 'OPEN',
+        months: { jan: 1000, feb: 2000, mar: 2000 }
+    },
+    {
+        planId: 'PLAN-002',
+        version: '202512',
+        lastUpdate: '2026-01-15',
+        pssClient: 'CLI-DEF',
+        pssWarehouse: 'WH-02',
+        productBarcode: '9876543210987',
+        pssSupplier: 'SUP-XYZ',
+        client: 'CLI-DEF',
+        productCode: 'PROD-102',
+        productName: 'Bluetooth Speaker',
+        country: 'UK',
+        netReq: 3000,
+        friDate: '2026-03-15',
+        status: 'PROPOSAL',
+        months: { jan: 500, feb: 1000, mar: 1500 }
+    }
 ];

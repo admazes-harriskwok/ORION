@@ -103,7 +103,7 @@ const SupplyPlan = () => {
                 )}
             </div>
 
-            <SyncBridge onSyncComplete={handleSyncComplete} />
+            <SyncBridge showPush={false} onSyncComplete={handleSyncComplete} />
 
 
 
@@ -252,16 +252,28 @@ const SupplyPlan = () => {
                 </div>
             </div>
 
+            {/* "Supply Plan received" Banner - Appears after table when Active */}
+            {isActive && (
+                <div className="bg-emerald-50 border border-emerald-100 rounded-2xl p-6 flex items-center justify-center gap-3 animate-in fade-in zoom-in duration-300">
+                    <CheckCircle className="text-emerald-600" size={20} />
+                    <span className="font-black text-emerald-700 uppercase tracking-widest text-xs">
+                        Supply Plan received. Move on to convert Supply Plan to Volume Forecast Extraction.
+                    </span>
+                </div>
+            )}
+
             {/* Forecast Creation Datasheet - Step 1.3.4 Complete */}
             {isActive && (
                 <div className="bg-slate-900 rounded-[3rem] p-10 text-white shadow-xl flex items-center justify-between group cursor-pointer animate-in slide-in-from-bottom" onClick={() => navigate('/volume-forecast')}>
-                    <div className="space-y-1">
-                        <div className="flex items-center gap-3 mb-2">
+                    <div className="space-y-4">
+                        <div>
+                            <h4 className="text-xl font-black uppercase tracking-tight text-white group-hover:text-blue-400 transition-colors">Forecast Creation Datasheet</h4>
+                            <p className="text-slate-400 text-sm font-medium">Supply Plan finalized. Ready to generate the volume forecast and logistics datasheet.</p>
+                        </div>
+                        <div className="flex items-center gap-3">
                             <span className="px-3 py-1 bg-blue-600 text-white text-[8px] font-black uppercase rounded-full tracking-widest">Next Step</span>
                             <span className="text-slate-500 text-[8px] font-black uppercase tracking-widest">Step 1.3.4 Complete</span>
                         </div>
-                        <h4 className="text-xl font-black uppercase tracking-tight text-white group-hover:text-blue-400 transition-colors">Forecast Creation Datasheet</h4>
-                        <p className="text-slate-400 text-sm font-medium">Supply Plan finalized. Ready to generate the volume forecast and logistics datasheet.</p>
                     </div>
                     <div className="flex items-center gap-4 bg-white/10 px-8 py-4 rounded-2xl group-hover:bg-blue-600 transition-all">
                         <span className="text-xs font-black uppercase tracking-[0.2em]">Generate Forecast</span>

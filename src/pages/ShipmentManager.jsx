@@ -28,6 +28,9 @@ const ShipmentManager = () => {
     const [modalNote, setModalNote] = useState("");
     const [supplierEdits, setSupplierEdits] = useState({}); // { [id]: { revisedQty, scheduleEtd, scheduleEta, comment } }
 
+    // EDI Success Modal State
+    const [ediModal, setEdiModal] = useState({ isOpen: false, content: '', shipmentId: '' });
+
     // Chat State
     const [chatConfig, setChatConfig] = useState({ isOpen: false, id: null });
 
@@ -72,19 +75,28 @@ const ShipmentManager = () => {
     const handleAction = async (id, action, note = "") => {
         setProcessingId(id);
         try {
-            if (action === 'BOOK') {
-                await finalizeShipmentBooking(id);
-                alert(`✅ SUCCESS: Shipment ${id} Finalized. EDI 940/945 generated.`);
-            } else if (action === 'MODIFY' && role === 'SUPPLIER') {
-                // Determine if we are sending granular edits or just a modal note
+            if (action === 'BOOK' || action === 'OKSUP' || action === 'VALIDATE_MOD') {
+                // Step 1.6.3 OKSUP or 1.6.4 Validate -> 1.6.5 Creation
+                const response = await finalizeShipmentBooking(id);
+
+                // Show EDI Success Modal with generated content
+                const ediContent = response?.ediContent || generateMockEDI940(id);
+                setEdiModal({
+                    isOpen: true,
+                    content: ediContent,
+                    shipmentId: id
+                });
+
+            } else if (action === 'PBSUP' && role === 'SUPPLIER') {
+                // Step 1.6.3 PBSUP (Modify) -> 1.6.4 Ops Review
                 const edits = supplierEdits[id] || {};
-                const payload = {
-                    ...edits,
-                    note: note || edits.comment // Use modal note or table comment
-                };
-                // In a real app, we might send specific fields for modification
-                await updateShipmentStatus(id, action, JSON.stringify(payload));
-                alert(`✅ Modification requested for ${id} with revised details.`);
+                const payload = { ...edits, note: note || edits.comment };
+                await updateShipmentStatus(id, 'MOD_REQUESTED', JSON.stringify(payload));
+                alert(`✅ PBSUP: Modification requested for ${id}. Sent to Ops for validation.`);
+            } else if (action === 'REJECT_MOD') {
+                // Step 1.6.4 Modified (Reject) -> Loop back to 1.6.3
+                await updateShipmentStatus(id, 'RELEASED_TO_SUPPLIER', note);
+                alert(`✅ Modification Rejected. Shipment ${id} returned to Supplier for review.`);
             } else {
                 await updateShipmentStatus(id, action, note);
                 alert(`✅ Action ${action} successful for Shipment ${id}`);
@@ -99,6 +111,21 @@ const ShipmentManager = () => {
         } finally {
             setProcessingId(null);
         }
+    };
+
+    // Mock EDI 940 Generator (fallback if backend doesn't return content)
+    const generateMockEDI940 = (shipmentId) => {
+        const timestamp = new Date().toISOString().replace(/[-:]/g, '').slice(0, 14);
+        return `ISA*00*          *00*          *ZZ*ORION_SYSTEM   *ZZ*3PL_WAREHOUSE  *${timestamp.slice(2, 8)}*${timestamp.slice(8, 12)}*U*00401*${timestamp.slice(-9)}*0*P*>~
+GS*OW*ORION_SYSTEM*3PL_WAREHOUSE*${timestamp.slice(2, 8)}*${timestamp.slice(8, 12)}*${timestamp.slice(-9)}*X*004010~
+ST*940*0001~
+W05*N*${shipmentId}*${timestamp.slice(2, 8)}~
+N1*ST*DESTINATION_WAREHOUSE*92*WH-GLOBAL~
+N1*SF*ORIGIN_SUPPLIER*92*MUSTN~
+W76*${Math.floor(Math.random() * 5000 + 1000)}*CA~
+SE*7*0001~
+GE*1*${timestamp.slice(-9)}~
+IEA*1*${timestamp.slice(-9)}~`;
     };
 
     const handleBatchAccept = async () => {
@@ -206,16 +233,31 @@ const ShipmentManager = () => {
                         </h2>
                         <p className="text-slate-500 font-medium font-sans italic">Step 1.6.1 - 1.6.5: Transport Booking & EDI 940 Generation</p>
                     </div>
-                    {role === 'OPS' && (
-                        <button
-                            onClick={handleGenerateProposals}
-                            disabled={isSimulating}
-                            className="bg-slate-900 text-white px-8 py-4 rounded-2xl font-black text-xs uppercase tracking-widest shadow-xl hover:bg-black transition-all active:scale-95 flex items-center gap-2"
-                        >
-                            {isSimulating ? <RefreshCw size={16} className="animate-spin" /> : <Ship size={16} />}
-                            {isSimulating ? "Generating..." : "Generate Shipment Proposals"}
-                        </button>
-                    )}
+                    <div className="flex items-center gap-4">
+                        {role === 'OPS' && (
+                            <>
+                                <button
+                                    onClick={handleGenerateProposals}
+                                    disabled={isSimulating}
+                                    className="bg-slate-900 text-white px-8 py-4 rounded-2xl font-black text-xs uppercase tracking-widest shadow-xl hover:bg-black transition-all active:scale-95 flex items-center gap-2"
+                                >
+                                    {isSimulating ? <RefreshCw size={16} className="animate-spin" /> : <Ship size={16} />}
+                                    {isSimulating ? "Generating..." : "Generate Shipment Proposals"}
+                                </button>
+                                <button
+                                    onClick={() => setEdiModal({
+                                        isOpen: true,
+                                        content: generateMockEDI940('SHP-2026-DEMO'),
+                                        shipmentId: 'SHP-2026-DEMO'
+                                    })}
+                                    className="bg-emerald-600 text-white px-6 py-3 rounded-2xl font-black text-[10px] uppercase tracking-widest shadow-lg hover:bg-emerald-700 transition-all active:scale-95 flex items-center gap-2"
+                                >
+                                    <Terminal size={14} />
+                                    Preview EDI Modal
+                                </button>
+                            </>
+                        )}
+                    </div>
                 </div>
             </div>
 
@@ -394,17 +436,17 @@ const ShipmentManager = () => {
                                                         ) : (
                                                             <>
                                                                 <button
-                                                                    onClick={() => handleAction(shipmentId, 'BOOK')}
+                                                                    onClick={() => handleAction(shipmentId, 'OKSUP')}
                                                                     className="px-3 py-1 bg-emerald-50 text-emerald-600 rounded-lg font-black text-[10px] uppercase hover:bg-emerald-100 flex items-center justify-center gap-1 w-full"
                                                                 >
-                                                                    <CheckCircle size={10} /> Accept
+                                                                    <CheckCircle size={10} /> OKSUP (Accept)
                                                                 </button>
                                                                 {Object.keys(supplierInput).length > 0 && (
                                                                     <button
-                                                                        onClick={() => handleAction(shipmentId, 'MODIFY')}
+                                                                        onClick={() => handleAction(shipmentId, 'PBSUP')}
                                                                         className="px-3 py-1 bg-amber-50 text-amber-600 rounded-lg font-black text-[10px] uppercase hover:bg-amber-100 flex items-center justify-center gap-1 w-full"
                                                                     >
-                                                                        <AlertCircle size={10} /> Submit Changes
+                                                                        <AlertCircle size={10} /> PBSUP (Modify)
                                                                     </button>
                                                                 )}
                                                             </>
@@ -518,18 +560,18 @@ const ShipmentManager = () => {
                             {role === 'OPS' && shipment.status === 'MOD_REQUESTED' && (
                                 <>
                                     <button
-                                        onClick={() => openModal(shipment.id, 'REJECT', 'Revise Shipment', 'Enter instructions for supplier...')}
+                                        onClick={() => openModal(shipment.id, 'REJECT_MOD', 'Reject Modification', 'Reason for rejection (Sends back to Supplier)...')}
                                         disabled={processingId === shipment.id}
                                         className="text-slate-600 px-6 py-3 rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-slate-50 transition-all font-sans"
                                     >
                                         Reject / Revise
                                     </button>
                                     <button
-                                        onClick={() => handleAction(shipment.id, 'BOOK')}
+                                        onClick={() => handleAction(shipment.id, 'VALIDATE_MOD')}
                                         disabled={processingId === shipment.id}
                                         className="bg-emerald-600 text-white px-8 py-4 rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-emerald-700 transition-all shadow-lg shadow-emerald-200 active:scale-95"
                                     >
-                                        Accept & Book
+                                        Validate (Accept Mod)
                                     </button>
                                 </>
                             )}
@@ -538,18 +580,18 @@ const ShipmentManager = () => {
                             {role === 'SUPPLIER' && shipment.status === 'RELEASED_TO_SUPPLIER' && (
                                 <>
                                     <button
-                                        onClick={() => openModal(shipment.id, 'MODIFY', 'Request Modification', 'Why are you requesting changes?')}
+                                        onClick={() => openModal(shipment.id, 'PBSUP', 'PBSUP: Request Modification', 'Explain changes to Qty or Schedule...')}
                                         disabled={processingId === shipment.id}
                                         className="text-amber-600 px-6 py-3 rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-amber-50 transition-all"
                                     >
-                                        Request Modification
+                                        PBSUP (Modify)
                                     </button>
                                     <button
-                                        onClick={() => handleAction(shipment.id, 'BOOK')}
+                                        onClick={() => handleAction(shipment.id, 'OKSUP')}
                                         disabled={processingId === shipment.id}
                                         className="bg-emerald-600 text-white px-8 py-4 rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-emerald-700 transition-all shadow-lg shadow-emerald-200 active:scale-95"
                                     >
-                                        Accept Proposal
+                                        OKSUP (Validate)
                                     </button>
                                 </>
                             )}
@@ -657,6 +699,78 @@ const ShipmentManager = () => {
                     </div>
                 )
             }
+
+            {/* EDI Success Modal (Step 1.6.5) */}
+            {ediModal.isOpen && (
+                <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-sm z-[100] flex items-center justify-center p-6 animate-in fade-in duration-300">
+                    <div className="bg-white rounded-[3rem] w-full max-w-3xl shadow-2xl overflow-hidden animate-in zoom-in slide-in-from-bottom-10 duration-500">
+                        <div className="p-10">
+                            {/* Header */}
+                            <div className="flex justify-between items-start mb-8">
+                                <div className="space-y-2">
+                                    <div className="flex items-center gap-3">
+                                        <div className="w-12 h-12 bg-emerald-100 text-emerald-600 rounded-2xl flex items-center justify-center">
+                                            <CheckCircle size={24} />
+                                        </div>
+                                        <div>
+                                            <h3 className="text-3xl font-black text-slate-900 tracking-tight uppercase leading-none">
+                                                Shipment Order Created
+                                            </h3>
+                                            <p className="text-emerald-600 font-bold text-sm mt-1">EDI 940 Generated & Sent to PSS</p>
+                                        </div>
+                                    </div>
+                                </div>
+                                <button
+                                    onClick={() => setEdiModal({ isOpen: false, content: '', shipmentId: '' })}
+                                    className="text-slate-400 hover:text-slate-600 transition-colors"
+                                >
+                                    <X size={24} />
+                                </button>
+                            </div>
+
+                            {/* Shipment ID */}
+                            <div className="bg-blue-50 border border-blue-100 rounded-2xl p-6 mb-6">
+                                <p className="text-xs font-black text-blue-600 uppercase tracking-widest mb-1">Shipment Reference</p>
+                                <p className="text-2xl font-black text-slate-900">{ediModal.shipmentId}</p>
+                            </div>
+
+                            {/* EDI Content Display */}
+                            <div className="space-y-3 mb-8">
+                                <div className="flex items-center gap-2">
+                                    <Terminal size={16} className="text-slate-400" />
+                                    <p className="text-xs font-black text-slate-400 uppercase tracking-widest">EDI 940 Transmission Content</p>
+                                </div>
+                                <div className="bg-slate-900 rounded-2xl p-6 max-h-[400px] overflow-auto custom-scrollbar">
+                                    <pre className="text-emerald-400 font-mono text-xs leading-relaxed whitespace-pre-wrap break-all">
+                                        {ediModal.content}
+                                    </pre>
+                                </div>
+                            </div>
+
+                            {/* Integration Status */}
+                            <div className="bg-amber-50 border border-amber-100 rounded-2xl p-6 mb-8">
+                                <div className="flex items-center gap-3">
+                                    <div className="w-2 h-2 bg-amber-500 rounded-full animate-pulse" />
+                                    <p className="text-sm font-bold text-amber-900">
+                                        Waiting for Integration Log confirmation from PSS...
+                                    </p>
+                                </div>
+                            </div>
+
+                            {/* Action Button */}
+                            <button
+                                onClick={() => {
+                                    setEdiModal({ isOpen: false, content: '', shipmentId: '' });
+                                    loadData();
+                                }}
+                                className="w-full bg-slate-900 text-white px-8 py-4 rounded-2xl font-black text-xs uppercase tracking-widest shadow-xl hover:bg-black transition-all"
+                            >
+                                Close & Refresh
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
 
             {/* Chat Sidebar */}
             <CollaborationChat
