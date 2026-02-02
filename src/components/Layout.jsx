@@ -187,13 +187,7 @@ const Header = () => {
                     </span>
                 </div>
 
-                <button
-                    onClick={toggleRole}
-                    className="flex items-center gap-2 bg-slate-900 hover:bg-black text-white px-4 py-2.5 rounded-xl text-[10px] font-black transition-all shadow-md active:scale-95"
-                >
-                    <RefreshCw className="w-3.5 h-3.5" />
-                    VIEW AS {role === 'OPS' ? 'SUPPLIER' : 'OPS MANAGER'}
-                </button>
+
 
                 <div className="w-px h-8 bg-slate-100 mx-1" />
 

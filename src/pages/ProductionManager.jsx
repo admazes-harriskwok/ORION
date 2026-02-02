@@ -109,7 +109,14 @@ const ProductionManager = () => {
 
     useEffect(() => {
         loadData();
-    }, []);
+        // Auto-refresh logic: Retrieve table from Google Sheet every 15 seconds
+        const interval = setInterval(() => {
+            if (!isProcessing && !isSimulating) {
+                loadData(false);
+            }
+        }, 15000);
+        return () => clearInterval(interval);
+    }, [isProcessing, isSimulating]);
 
     // Step 1.4.1: Action for Ops
     const handleGeneratePlan = async () => {
@@ -167,7 +174,7 @@ const ProductionManager = () => {
             }
 
             await loadData();
-            alert("✅ SUCCESS: Step 1.4.3 executed. Production Orders are now APPROVED & FIRM. EDI 850 Transmitted.");
+            alert("✅ SUCCESS: Step 1.4.3 executed. Direct EDI Generation Complete. Production Orders are now FIRM.");
         } catch (err) {
             alert("❌ ERROR: Final confirmation failed: " + err.message);
         } finally {
