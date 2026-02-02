@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Truck, Ship, Anchor, Send, CheckCircle, AlertCircle, RefreshCw, Calendar, Package, ArrowRight, MessageSquare, ShieldCheck, Terminal, Eye, EyeOff, Database, X } from 'lucide-react';
+import { Truck, Ship, Anchor, Send, CheckCircle, AlertCircle, RefreshCw, Calendar, Package, ArrowRight, MessageSquare, ShieldCheck, Terminal, Eye, EyeOff, Database, X, Loader2, ChevronRight } from 'lucide-react';
 import { clsx } from 'clsx';
 import {
     fetchShipments,
@@ -26,7 +26,34 @@ const ShipmentManager = () => {
     // Modal State
     const [modalConfig, setModalConfig] = useState(null); // { id, action, title, placeholder }
     const [modalNote, setModalNote] = useState("");
-    const [supplierEdits, setSupplierEdits] = useState({}); // { [id]: { revisedQty, scheduleEtd, scheduleEta, comment } }
+    const [supplierInputs, setSupplierInputs] = useState({}); // { shipmentId: { revisedQty, scheduleEtd, loadingType, comment } }
+    const [lastReleasedId, setLastReleasedId] = useState(null);
+    const [currentAlertIndex, setCurrentAlertIndex] = useState(-1);
+    const [isNavigating, setIsNavigating] = useState(false);
+
+    const scrollToAlert = (index) => {
+        const alertedProposals = filteredProposals.filter(row => {
+            const shipmentId = row.Shipment_ID || row.Group_ID || row.Order_No;
+            const input = supplierInputs[shipmentId] || {};
+            return true;
+        });
+
+        if (alertedProposals.length > 0) {
+            setIsNavigating(true);
+            setTimeout(() => {
+                const nextIndex = (index + 1) % alertedProposals.length;
+                setCurrentAlertIndex(nextIndex);
+                const targetId = `alert-row-${nextIndex}`;
+                const element = document.getElementById(targetId);
+                if (element) {
+                    element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    element.classList.add('bg-blue-50');
+                    setTimeout(() => element.classList.remove('bg-blue-50'), 2000);
+                }
+                setIsNavigating(false);
+            }, 600);
+        }
+    };
 
     // EDI Success Modal State
     const [ediModal, setEdiModal] = useState({ isOpen: false, content: '', shipmentId: '' });
@@ -59,6 +86,26 @@ const ShipmentManager = () => {
         loadData();
     }, []);
 
+    // Step 1.6.4: Alert for Ops side on changes raised by suppliers
+    useEffect(() => {
+        if (role === 'OPS') {
+            const hasModReq = shipments.some(s => s.status === 'MOD_REQUESTED');
+            if (hasModReq) {
+                alert("⚠️ ATTENTION OPS: Suppliers have raised modification requests (PBSUP). Please review the Shipment Control Tower.");
+            }
+            if (lastReleasedId) {
+                alert(`✅ Shipment ${lastReleasedId} has been released to supplier.`);
+                setLastReleasedId(null); // Clear after showing alert
+            }
+        }
+        if (role === 'SUPPLIER') {
+            const hasNewRelease = shipments.some(s => s.status === 'RELEASED_TO_SUPPLIER');
+            if (hasNewRelease) {
+                alert("🔔 ATTENTION SUPPLIER: New shipment proposals have been released for your review (Step 1.6.3).");
+            }
+        }
+    }, [role, shipments.length, lastReleasedId]);
+
     const handleGenerateProposals = async () => {
         setIsSimulating(true);
         try {
@@ -75,11 +122,22 @@ const ShipmentManager = () => {
     const handleAction = async (id, action, note = "") => {
         setProcessingId(id);
         try {
+            const ship = visibleShipments.find(s => s.id === id) || proposals.find(p => p.id === id);
+            const input = supplierInputs[id] || {};
+
+            const payload = {
+                action_type: action,
+                note: note || input.comment || "",
+                revised_qty: input.revisedQty || (ship ? ship.qty : 0),
+                revised_etd: input.scheduleEtd || (ship ? ship.etd : ""),
+                loading_type: input.loadingType || (ship ? ship.loadingType : "CFS")
+            };
+
             if (action === 'BOOK' || action === 'OKSUP' || action === 'VALIDATE_MOD') {
-                // Step 1.6.3 OKSUP or 1.6.4 Validate -> 1.6.5 Creation
+                // Step 1.6.5: Shipment Order Creation (Triggered by mutually agreed proposal)
                 const response = await finalizeShipmentBooking(id);
 
-                // Show EDI Success Modal with generated content
+                // Show EDI Success Modal - 1.6.5 Requirement
                 const ediContent = response?.ediContent || generateMockEDI940(id);
                 setEdiModal({
                     isOpen: true,
@@ -87,23 +145,44 @@ const ShipmentManager = () => {
                     shipmentId: id
                 });
 
+                alert("🚀 Step 1.6.5: Shipment Order created. Final EDI 850/940 transmitted toLegacy PSS.");
+
             } else if (action === 'PBSUP' && role === 'SUPPLIER') {
-                // Step 1.6.3 PBSUP (Modify) -> 1.6.4 Ops Review
-                const edits = supplierEdits[id] || {};
-                const payload = { ...edits, note: note || edits.comment };
+                // Step 1.6.3 (PBSUP) -> Proceed to 1.6.4
                 await updateShipmentStatus(id, 'MOD_REQUESTED', JSON.stringify(payload));
-                alert(`✅ PBSUP: Modification requested for ${id}. Sent to Ops for validation.`);
-            } else if (action === 'REJECT_MOD') {
-                // Step 1.6.4 Modified (Reject) -> Loop back to 1.6.3
-                await updateShipmentStatus(id, 'RELEASED_TO_SUPPLIER', note);
-                alert(`✅ Modification Rejected. Shipment ${id} returned to Supplier for review.`);
+                alert(`✅ PBSUP: Proposal modified. Redirecting to Step 1.6.4 for Ops re-validation.`);
+
+            } else if (action === 'REVISED_MOD' && role === 'OPS') {
+                // Step 1.6.4 Loop back to 1.6.3
+                await updateShipmentStatus(id, 'RELEASED_TO_SUPPLIER', note || "Ops rejection: Please revise dates/quantities.");
+                alert(`✅ Step 1.6.4: Ops rejected modification. Proposal looped back to Supplier (Step 1.6.3).`);
+
             } else {
-                await updateShipmentStatus(id, action, note);
+                await updateShipmentStatus(id, action, payload);
                 alert(`✅ Action ${action} successful for Shipment ${id}`);
             }
+
+            if (action === 'RELEASE') {
+                setLastReleasedId(id);
+                alert(`✅ SUCCESS: Shipment ${id} released to supplier.`);
+            }
+
+            if (action === 'PBSUP') {
+                alert(`⚠️ PBSUP: Modification request submitted for ${id}.`);
+            }
+            if (action === 'OKSUP') {
+                alert(`✅ OKSUP: Shipment ${id} accepted by supplier.`);
+            }
+
             await loadData();
             setModalConfig(null);
             setModalNote("");
+            // Clear inputs for this shipment
+            setSupplierInputs(prev => {
+                const next = { ...prev };
+                delete next[id];
+                return next;
+            });
         } catch (err) {
             console.error("Action failed", err);
             const msg = err.message.includes("DOCTYPE") ? "Server Error (500): The backend service is currently unavailable." : err.message;
@@ -151,7 +230,7 @@ IEA*1*${timestamp.slice(-9)}~`;
     };
 
     const handleSupplierInput = (id, field, value) => {
-        setSupplierEdits(prev => ({
+        setSupplierInputs(prev => ({
             ...prev,
             [id]: {
                 ...prev[id],
@@ -304,30 +383,60 @@ IEA*1*${timestamp.slice(-9)}~`;
                         </div>
                     </div>
 
+                    {/* Alert Tracker Bar - Below Header */}
+                    {showProposals && filteredProposals.length > 0 && (
+                        <div className="px-8 py-3 bg-amber-50/50 border-b border-amber-100 flex items-center justify-between">
+                            <div className="flex items-center gap-3">
+                                <div className="p-1.5 bg-amber-100 rounded-lg text-amber-600">
+                                    <AlertCircle size={14} />
+                                </div>
+                                <span className="text-[10px] font-black text-amber-700 uppercase tracking-tight">
+                                    {filteredProposals.length} Proposals Requiring Review/Action
+                                </span>
+                            </div>
+                            <button
+                                onClick={() => scrollToAlert(currentAlertIndex)}
+                                disabled={isNavigating}
+                                className="bg-amber-500 text-white px-4 py-1.5 rounded-xl text-[9px] font-black uppercase hover:bg-amber-600 transition-all active:scale-95 shadow-sm flex items-center gap-2 min-w-[120px] justify-center"
+                            >
+                                {isNavigating ? (
+                                    <>
+                                        <Loader2 size={12} className="animate-spin" /> Locating...
+                                    </>
+                                ) : (
+                                    <>
+                                        Jump to Next Action <ChevronRight size={12} />
+                                    </>
+                                )}
+                            </button>
+                        </div>
+                    )}
+
                     {showProposals && (
                         <div className="table-container sticky-header max-h-[500px]">
                             <table className="w-full text-left whitespace-nowrap">
                                 <thead>
-                                    <tr className="bg-slate-50/80">
-                                        <th className="p-4 text-[10px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100 min-w-[120px]">Order Info</th>
-                                        <th className="p-4 text-[10px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100 text-center">Product</th>
-                                        <th className="p-4 text-[10px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100 text-center">Logistics</th>
-                                        <th className="p-4 text-[10px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100 text-center">System Proposal</th>
+                                    <tr className="bg-slate-50 border-b border-slate-200">
+                                        <th className="p-4 text-left text-[10px] font-black text-slate-400 uppercase tracking-widest">ID</th>
+                                        <th className="p-4 text-left text-[10px] font-black text-slate-400 uppercase tracking-widest">Pol/Pod</th>
+                                        <th className="p-4 text-left text-[10px] font-black text-slate-400 uppercase tracking-widest">Target ETD</th>
+                                        <th className="p-4 text-left text-[10px] font-black text-slate-400 uppercase tracking-widest">Baseline Qty</th>
                                         {role === 'SUPPLIER' && (
                                             <>
-                                                <th className="p-4 text-[10px] font-black text-blue-500 uppercase tracking-widest border-b border-blue-100 text-center bg-blue-50/20">Action: Revise Qty</th>
-                                                <th className="p-4 text-[10px] font-black text-blue-500 uppercase tracking-widest border-b border-blue-100 text-center bg-blue-50/20">Action: Schedule</th>
-                                                <th className="p-4 text-[10px] font-black text-blue-500 uppercase tracking-widest border-b border-blue-100 text-center bg-blue-50/20">Action: Comment</th>
+                                                <th className="p-4 text-left text-[10px] font-black text-blue-600 uppercase tracking-widest bg-blue-50/50">ETD Revision</th>
+                                                <th className="p-4 text-left text-[10px] font-black text-blue-600 uppercase tracking-widest bg-blue-50/50">Revised Qty</th>
+                                                <th className="p-4 text-left text-[10px] font-black text-blue-600 uppercase tracking-widest bg-blue-50/50">Loading Type</th>
+                                                <th className="p-4 text-left text-[10px] font-black text-blue-600 uppercase tracking-widest bg-blue-50/50">Comment</th>
                                             </>
                                         )}
-                                        <th className="p-4 text-[10px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100 text-right">Control</th>
+                                        <th className="p-4 text-right text-[10px] font-black text-slate-400 uppercase tracking-widest">Action</th>
                                     </tr>
                                 </thead>
 
                                 <tbody className="divide-y divide-slate-50">
                                     {filteredProposals.map((row, idx) => {
                                         const shipmentId = row.Shipment_ID || row.Group_ID || row.Order_No || `PROP-${idx}`;
-                                        const supplierInput = supplierEdits[shipmentId] || {};
+                                        const supplierInput = supplierInputs[shipmentId] || {};
 
                                         // Data Mapping with Fallbacks
                                         const orderNo = row.Order_No || row.Shipment_ID;
@@ -342,9 +451,15 @@ IEA*1*${timestamp.slice(-9)}~`;
                                         const etd = row.ETD || row.Target_ETD;
                                         const eta = row.ETA_Warehouse || row.Target_ETA;
                                         const qty = parseInt(row.Order_Qty || row.Qty || 0);
+                                        // Find global alert index for jumping
+                                        const alertId = `alert-row-${idx}`;
 
                                         return (
-                                            <tr key={idx} className="hover:bg-blue-50/5 transition-all text-xs font-medium text-slate-600">
+                                            <tr
+                                                key={idx}
+                                                id={alertId}
+                                                className="hover:bg-blue-50/5 transition-all text-xs font-medium text-slate-600 scroll-mt-40"
+                                            >
                                                 {/* Identity */}
                                                 <td className="p-4 align-top">
                                                     <div className="flex flex-col">
@@ -390,6 +505,14 @@ IEA*1*${timestamp.slice(-9)}~`;
                                                     <>
                                                         <td className="p-4 align-top bg-blue-50/10">
                                                             <input
+                                                                type="date"
+                                                                className="w-28 px-2 py-1 bg-white border border-blue-200 rounded text-[10px] font-bold text-blue-600 focus:ring-2 focus:ring-blue-400 outline-none"
+                                                                value={supplierInput.scheduleEtd || ''}
+                                                                onChange={(e) => handleSupplierInput(shipmentId, 'scheduleEtd', e.target.value)}
+                                                            />
+                                                        </td>
+                                                        <td className="p-4 align-top bg-blue-50/10">
+                                                            <input
                                                                 type="number"
                                                                 className="w-20 px-2 py-1 bg-white border border-blue-200 rounded text-center font-bold text-blue-600 text-xs focus:ring-2 focus:ring-blue-400 outline-none"
                                                                 placeholder={qty}
@@ -398,20 +521,14 @@ IEA*1*${timestamp.slice(-9)}~`;
                                                             />
                                                         </td>
                                                         <td className="p-4 align-top bg-blue-50/10">
-                                                            <div className="flex flex-col gap-1">
-                                                                <input
-                                                                    type="date"
-                                                                    className="w-24 px-1 py-1 bg-white border border-blue-200 rounded text-[10px] focus:ring-2 focus:ring-blue-400 outline-none"
-                                                                    value={supplierInput.scheduleEtd || ''} // Default to empty to show placeholder effect or blank if not filled
-                                                                    onChange={(e) => handleSupplierInput(shipmentId, 'scheduleEtd', e.target.value)}
-                                                                />
-                                                                <input
-                                                                    type="date"
-                                                                    className="w-24 px-1 py-1 bg-white border border-blue-200 rounded text-[10px] focus:ring-2 focus:ring-blue-400 outline-none"
-                                                                    value={supplierInput.scheduleEta || ''}
-                                                                    onChange={(e) => handleSupplierInput(shipmentId, 'scheduleEta', e.target.value)}
-                                                                />
-                                                            </div>
+                                                            <select
+                                                                className="w-20 px-1 py-1 bg-white border border-blue-200 rounded text-[10px] font-bold text-blue-600 focus:ring-2 focus:ring-blue-400 outline-none"
+                                                                value={supplierInput.loadingType || 'CFS'}
+                                                                onChange={(e) => handleSupplierInput(shipmentId, 'loadingType', e.target.value)}
+                                                            >
+                                                                <option value="CFS">CFS</option>
+                                                                <option value="CY">CY</option>
+                                                            </select>
                                                         </td>
                                                         <td className="p-4 align-top bg-blue-50/10">
                                                             <textarea
@@ -427,24 +544,38 @@ IEA*1*${timestamp.slice(-9)}~`;
                                                 <td className="p-4 text-right align-top">
                                                     <div className="flex flex-col gap-2 items-end">
                                                         {role === 'OPS' ? (
-                                                            <button
-                                                                onClick={() => handleAction(shipmentId, 'RELEASE')}
-                                                                className="px-3 py-1 bg-indigo-50 text-indigo-600 rounded-lg font-black text-[10px] uppercase hover:bg-indigo-100 w-full"
-                                                            >
-                                                                Release
-                                                            </button>
+                                                            <div className="flex flex-col gap-1">
+                                                                <button
+                                                                    onClick={() => handleAction(shipmentId, 'RELEASE')}
+                                                                    className="px-3 py-1 bg-indigo-50 text-indigo-600 rounded-lg font-black text-[10px] uppercase hover:bg-indigo-100 w-full"
+                                                                >
+                                                                    Release
+                                                                </button>
+                                                                {lastReleasedId === shipmentId && (
+                                                                    <span className="text-[8px] font-black text-indigo-400 uppercase animate-pulse text-center">Released ✅</span>
+                                                                )}
+                                                            </div>
                                                         ) : (
                                                             <>
-                                                                <button
-                                                                    onClick={() => handleAction(shipmentId, 'OKSUP')}
-                                                                    className="px-3 py-1 bg-emerald-50 text-emerald-600 rounded-lg font-black text-[10px] uppercase hover:bg-emerald-100 flex items-center justify-center gap-1 w-full"
-                                                                >
-                                                                    <CheckCircle size={10} /> OKSUP (Accept)
-                                                                </button>
-                                                                {Object.keys(supplierInput).length > 0 && (
+                                                                {/* Only show OKSUP if NO changes detected */}
+                                                                {(!supplierInput.revisedQty && !supplierInput.scheduleEtd && !supplierInput.loadingType) && (
                                                                     <button
-                                                                        onClick={() => handleAction(shipmentId, 'PBSUP')}
-                                                                        className="px-3 py-1 bg-amber-50 text-amber-600 rounded-lg font-black text-[10px] uppercase hover:bg-amber-100 flex items-center justify-center gap-1 w-full"
+                                                                        onClick={() => handleAction(shipmentId, 'OKSUP')}
+                                                                        className="px-3 py-1 bg-emerald-50 text-emerald-600 rounded-lg font-black text-[10px] uppercase hover:bg-emerald-100 flex items-center justify-center gap-1 w-full"
+                                                                    >
+                                                                        <CheckCircle size={10} /> OKSUP (Accept)
+                                                                    </button>
+                                                                )}
+
+                                                                {/* Always allow PBSUP if something is entered or if they want to reject */}
+                                                                {(supplierInput.revisedQty || supplierInput.scheduleEtd || supplierInput.loadingType || supplierInput.comment) && (
+                                                                    <button
+                                                                        onClick={() => {
+                                                                            if (window.confirm('Are you sure you want to propose modifications? This will send your changes back to the OPS team for review.')) {
+                                                                                handleAction(shipmentId, 'PBSUP');
+                                                                            }
+                                                                        }}
+                                                                        className="px-3 py-1 bg-amber-50 text-amber-600 rounded-lg font-black text-[10px] uppercase hover:bg-amber-100 flex items-center justify-center gap-1 w-full border border-amber-200"
                                                                     >
                                                                         <AlertCircle size={10} /> PBSUP (Modify)
                                                                     </button>
@@ -456,7 +587,7 @@ IEA*1*${timestamp.slice(-9)}~`;
                                             </tr>
                                         );
                                     })}
-                                    {proposals.length === 0 && (
+                                    {filteredProposals.length === 0 && (
                                         <tr>
                                             <td colSpan="100%" className="p-20 text-center text-slate-300 font-black uppercase italic">
                                                 No proposals generated.
@@ -560,18 +691,18 @@ IEA*1*${timestamp.slice(-9)}~`;
                             {role === 'OPS' && shipment.status === 'MOD_REQUESTED' && (
                                 <>
                                     <button
-                                        onClick={() => openModal(shipment.id, 'REJECT_MOD', 'Reject Modification', 'Reason for rejection (Sends back to Supplier)...')}
+                                        onClick={() => openModal(shipment.id, 'REVISED_MOD', 'Step 1.6.4: Reject & Propose Revision', 'Explain why the modification is rejected (Loops back to Supplier)...')}
                                         disabled={processingId === shipment.id}
-                                        className="text-slate-600 px-6 py-3 rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-slate-50 transition-all font-sans"
+                                        className="text-rose-600 px-6 py-3 rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-rose-50 transition-all"
                                     >
-                                        Reject / Revise
+                                        Reject & Loop Back
                                     </button>
                                     <button
                                         onClick={() => handleAction(shipment.id, 'VALIDATE_MOD')}
                                         disabled={processingId === shipment.id}
                                         className="bg-emerald-600 text-white px-8 py-4 rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-emerald-700 transition-all shadow-lg shadow-emerald-200 active:scale-95"
                                     >
-                                        Validate (Accept Mod)
+                                        Validate (Ops Accept)
                                     </button>
                                 </>
                             )}
@@ -623,7 +754,7 @@ IEA*1*${timestamp.slice(-9)}~`;
             </div>
 
             {/* Integration Logs Console */}
-            <div className="space-y-6">
+            < div className="space-y-6" >
                 <button
                     onClick={() => setShowLogs(!showLogs)}
                     className="flex items-center gap-3 text-slate-500 hover:text-slate-900 transition-all"
@@ -747,12 +878,13 @@ IEA*1*${timestamp.slice(-9)}~`;
                                 </div>
                             </div>
 
-                            {/* Integration Status */}
+                            {/* Integration Status (Step 1.6.5 Completion) */}
                             <div className="bg-amber-50 border border-amber-100 rounded-2xl p-6 mb-8">
                                 <div className="flex items-center gap-3">
                                     <div className="w-2 h-2 bg-amber-500 rounded-full animate-pulse" />
-                                    <p className="text-sm font-bold text-amber-900">
-                                        Waiting for Integration Log confirmation from PSS...
+                                    <p className="text-sm font-bold text-amber-900 leading-relaxed font-sans">
+                                        Step 1.6.5 Integration Log: Transmitting final agreed data to Legacy PSS...
+                                        Waiting for "Integration Log received in form of EDI" to confirm end-to-end success.
                                     </p>
                                 </div>
                             </div>
@@ -779,7 +911,7 @@ IEA*1*${timestamp.slice(-9)}~`;
                 contextId={chatConfig.id}
                 contextType="SHIPMENT"
             />
-        </div >
+        </div>
     );
 };
 

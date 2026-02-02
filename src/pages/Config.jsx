@@ -131,13 +131,10 @@ const Config = () => {
         }
     };
 
-    const handleFullReset = () => {
+    const handleFullReset = async () => {
         if (confirm("SYSTEM RESET: This will clear ALL workflow prerequisites. Proceed?")) {
-            localStorage.removeItem('prereq_masterDataSynced');
-            localStorage.removeItem('prereq_assortmentConfirmed');
-            localStorage.removeItem('prereq_paramsSaved');
-            localStorage.removeItem('prereq_planActive');
-            localStorage.removeItem('prereq_ordersConfirmed');
+            const { clearLocalWorkflowState } = await import('../utils/api');
+            clearLocalWorkflowState();
             window.location.reload();
         }
     };

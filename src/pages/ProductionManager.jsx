@@ -42,6 +42,28 @@ const ProductionManager = () => {
     const [editData, setEditData] = useState({}); // Tracking supplier inputs
     const [ediDisplay, setEdiDisplay] = useState(null);
     const [ediLink, setEdiLink] = useState(null);
+    const [currentAlertIndex, setCurrentAlertIndex] = useState(-1);
+    const [isNavigating, setIsNavigating] = useState(false);
+
+    const scrollToAlert = (index) => {
+        const alertedRows = orders.filter(o => o.status === 'PROPOSAL' || o.status === 'PENDING_APPROVAL');
+
+        if (alertedRows.length > 0) {
+            setIsNavigating(true);
+            setTimeout(() => {
+                const nextIndex = (index + 1) % alertedRows.length;
+                setCurrentAlertIndex(nextIndex);
+                const targetId = `alert-row-${nextIndex}`;
+                const element = document.getElementById(targetId);
+                if (element) {
+                    element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    element.classList.add('bg-amber-50');
+                    setTimeout(() => element.classList.remove('bg-amber-50'), 2000);
+                }
+                setIsNavigating(false);
+            }, 600);
+        }
+    };
 
     // Chat State
     const [chatConfig, setChatConfig] = useState({ isOpen: false, id: null });
@@ -61,8 +83,8 @@ const ProductionManager = () => {
             setLastRefresh(new Date());
 
             // Check if all items are confirmed to show next step
-            const pending = data.filter(o => o.status === 'PROPOSAL' || o.status === 'PENDING_APPROVAL').length;
-            if (pending === 0 && data.length > 0) {
+            const pending = (data || []).filter(o => o.status === 'PROPOSAL' || o.status === 'PENDING_APPROVAL').length;
+            if (pending === 0 && (data || []).length > 0) {
                 setShowNextStep(true);
             }
 
@@ -94,37 +116,71 @@ const ProductionManager = () => {
         setIsProcessing(true);
         try {
             await generateProductionPlan();
-            alert("✅ SUCCESS: Production plan generated and notifications sent to suppliers.");
-            await loadData();
+            // Start polling for data refresh
+            let attempts = 0;
+            const maxAttempts = 12; // 1 minute total (5s intervals)
+            const checkData = async () => {
+                attempts++;
+                await loadData(false);
+                const hasProposals = (await fetchWorkingOrders()).some(o => o.status === 'PROPOSAL');
+
+                if (hasProposals || attempts >= maxAttempts) {
+                    setIsProcessing(false);
+                    if (hasProposals) alert("✅ SUCCESS: Production plan generated and synced.");
+                    else alert("⚠️ Timeout: Plan generated but data sync taking longer than expected. Please manually refresh in 30s.");
+                } else {
+                    setTimeout(checkData, 5000);
+                }
+            };
+            setTimeout(checkData, 5000);
         } catch (err) {
             alert("❌ ERROR: Failed to generate production plan: " + err.message);
+            setIsProcessing(false);
+        }
+    };
+
+    const handleFinalConfirmation = async () => {
+        const confirmable = orders.filter(o => o.status === 'PROPOSAL' || o.status === 'PENDING_APPROVAL');
+        if (confirmable.length === 0) {
+            alert("No pending proposals to confirm.");
+            return;
+        }
+
+        if (!confirm(`Execute Step 1.4.3: Final Confirmation? This will finalize ${confirmable.length} accepted proposals and prepare transport booking prerequisites.`)) return;
+
+        setIsProcessing(true);
+        try {
+            localStorage.setItem('prereq_ordersConfirmed', 'true');
+            // Connect to webhook/confirm-production-order for all unconfirmed
+            for (const order of confirmable) {
+                const input = editData[order.planId] || { triggerQty: order.proposedQty, friDate: order.friDate };
+                await confirmProduction(order.planId, input.triggerQty, input.friDate);
+            }
+
+            await loadData();
+            alert("✅ SUCCESS: Step 1.4.3 executed. Production Orders are now APPROVED & FIRM. EDI 850 Transmitted.");
+        } catch (err) {
+            alert("❌ ERROR: Final confirmation failed: " + err.message);
         } finally {
             setIsProcessing(false);
         }
     };
 
-    // Step 1.4.3: Action for Supplier (Individual) or Ops (Execute Workflow)
-    const handleConfirmOrder = async (planId) => {
+    const handleConfirmOrderInput = async (planId) => {
         setIsProcessing(true);
         try {
-            if (planId.startsWith('CONS_')) {
-                const consRow = filteredOrders.find(o => o.planId === planId);
-                // Confirm all underlying orders
-                for (const pId of consRow.underlyingPlanIds) {
-                    const input = editData[pId];
-                    await confirmProduction(pId, input.triggerQty, input.friDate);
-                }
-                alert(`✅ ${consRow.underlyingPlanIds.length} Component Orders Confirmed. EDI 850 Sent.`);
-            } else {
-                const input = editData[planId];
-                const result = await confirmProduction(planId, input.triggerQty, input.friDate);
-                if (result.status === 'success' || result.edi_content) {
-                    setEdiDisplay(result.edi_content);
-                    setEdiLink(result.edi_link);
-                    setShowLogs(true); // Auto-show logs to see the EDI
-                }
-                alert(`✅ Order Confirmed. EDI 850 Sent.`);
+            const input = editData[planId];
+            if (!input?.friDate) {
+                alert("Please select a FRI Date before confirming.");
+                return;
             }
+            const result = await confirmProduction(planId, input.triggerQty, input.friDate);
+            if (result.status === 'success' || result.edi_content) {
+                setEdiDisplay(result.edi_content);
+                setEdiLink(result.edi_link);
+                setShowLogs(true);
+            }
+            alert(`✅ Order Confirmed. EDI 850 Sent.`);
             await loadData();
         } catch (err) {
             alert("❌ ERROR: Order confirmation failed. " + err.message);
@@ -133,105 +189,27 @@ const ProductionManager = () => {
         }
     };
 
-    const handleExecute143 = async () => {
-        const proposals = orders.filter(o => o.status === 'PROPOSAL' || o.status === 'PENDING_APPROVAL');
-        if (proposals.length === 0) {
-            alert("No pending proposals found to confirm.");
-            return;
-        }
+    const handleBatchConfirmActual = async () => {
+        const proposalRows = filteredOrders.filter(o => o.status === 'PROPOSAL' || o.status === 'PENDING_APPROVAL');
+        if (proposalRows.length === 0) return;
 
-        if (!confirm(`🚀 EXECUTE STEP 1.4.3: This will trigger the final production commitment and EDI 850 transmission for ${proposals.length} orders. Proceed?`)) return;
+        if (!confirm(`🚀 CONFIRM ALL: This will confirm ${proposalRows.length} orders. Proceed?`)) return;
 
         setIsProcessing(true);
         setShowSyncBanner(true);
-
         try {
-            for (const order of proposals) {
-                const input = editData[order.planId] || { triggerQty: order.proposedQty, friDate: '2026-03-30' };
-                const result = await confirmProduction(order.planId, input.triggerQty, input.friDate || '2026-03-30');
-                if (result.edi_content) {
-                    setEdiDisplay(result.edi_content);
-                    setEdiLink(result.edi_link);
-                }
-                // Small delay to prevent n8n execution bursting
-                await new Promise(r => setTimeout(r, 300));
+            for (const order of proposalRows) {
+                const input = editData[order.planId] || { triggerQty: order.proposedQty, friDate: order.friDate };
+                if (!input.friDate) continue; // Skip incomplete
+                await confirmProduction(order.planId, input.triggerQty, input.friDate);
+                await new Promise(r => setTimeout(r, 400));
             }
-
-            alert("✅ STEP 1.4.3 EXECUTED: All selected production orders have been confirmed and EDI 850 files transmitted.");
-
-            // Sequential refreshes to avoid concurrent executions
-            await loadData(false);
-            await new Promise(r => setTimeout(r, 4000));
-            await loadData(false);
-
+            alert("✅ SUCCESS: All orders confirmed and EDI files transmitted.");
+            await loadData();
             setShowSyncBanner(false);
-
         } catch (err) {
-            alert("❌ EXECUTION FAILED: " + err.message);
-            setShowSyncBanner(false);
+            alert("❌ BATCH ERROR: " + err.message);
         } finally {
-            setIsProcessing(false);
-        }
-    };
-
-    const handleBulkConfirm = async () => {
-        const proposalCount = orders.filter(o => o.status === 'PROPOSAL').length;
-        if (proposalCount === 0) return;
-
-        if (!confirm(`🚀 BATCH ACTION: This will confirm all ${proposalCount} remaining proposals. Proceed?`)) return;
-
-        setIsSimulating(true);
-        setShowSyncBanner(true);
-
-        try {
-            // Reusing calculateOrders with SIMULATE_INPUTS as a proxy for bulk confirm in this demo
-            await (await import('../utils/api')).calculateOrders("SIMULATE_INPUTS");
-
-            // Sequential refreshes to avoid concurrent executions
-            await loadData(false);
-            await new Promise(r => setTimeout(r, 4000));
-            await loadData(false);
-            await new Promise(r => setTimeout(r, 4000));
-            await loadData(false);
-
-            setShowSyncBanner(false);
-            setIsSimulating(false);
-            alert("✅ BATCH COMPLETE: All proposals successfully confirmed.");
-
-        } catch (err) {
-            alert("❌ BATCH ERROR: Failed to bulk confirm: " + err.message);
-            setShowSyncBanner(false);
-            setIsSimulating(false);
-        }
-    };
-
-    const handleBatchApprove = async () => {
-        const pendingOrders = orders.filter(o => o.status === 'PENDING_APPROVAL');
-        if (pendingOrders.length === 0) return;
-
-        if (!confirm(`🛡️ OPS ACTION: This will approve ${pendingOrders.length} orders currently awaiting review. Proceed?`)) return;
-
-        setIsProcessing(true);
-        setShowSyncBanner(true);
-
-        try {
-            const { manageOrders } = await import('../utils/api');
-            await manageOrders(pendingOrders.map(o => o.planId), 'APPROVE_RPO');
-
-            // Sequential refreshes to avoid concurrent executions
-            await loadData(false);
-            await new Promise(r => setTimeout(r, 4000));
-            await loadData(false);
-            await new Promise(r => setTimeout(r, 4000));
-            await loadData(false);
-
-            setShowSyncBanner(false);
-            setIsProcessing(false);
-            alert("✅ SUCCESS: All pending orders have been approved and moved to CONFIRMED status.");
-
-        } catch (err) {
-            alert("❌ ERROR: Batch approval failed: " + err.message);
-            setShowSyncBanner(false);
             setIsProcessing(false);
         }
     };
@@ -283,30 +261,10 @@ const ProductionManager = () => {
         }
     };
 
-    // Filtering and Consolidation logic (Step 1.4.2 & Supplier Consolidation)
+    // Filtering logic
     const filteredOrders = useMemo(() => {
-        if (role === 'OPS') return orders;
-
-        // Consolidate for Supplier: Group by ProductCode + FRI Date + Status
-        const groupMap = {};
-        orders.forEach(order => {
-            const key = `${order.productCode}_${order.friDate}_${order.status}`;
-            if (!groupMap[key]) {
-                groupMap[key] = {
-                    ...order,
-                    planId: `CONS_${key}`,
-                    proposedQty: 0,
-                    triggerQty: 0,
-                    underlyingPlanIds: [],
-                    isConsolidated: true
-                };
-            }
-            groupMap[key].proposedQty += (order.proposedQty || 0);
-            groupMap[key].triggerQty += (order.triggerQty || 0);
-            groupMap[key].underlyingPlanIds.push(order.planId);
-        });
-        return Object.values(groupMap);
-    }, [orders, role]);
+        return orders;
+    }, [orders]);
 
     return (
         <div className="space-y-10 animate-in fade-in duration-500 pb-20">
@@ -340,8 +298,8 @@ const ProductionManager = () => {
                 </div>
             </div>
 
-            {/* Sync Information Banner */}
-            {showSyncBanner && (
+            {/* Sync Information Banner - OPS ONLY */}
+            {(showSyncBanner && role === 'OPS') && (
                 <div className="bg-gradient-to-r from-blue-600 to-indigo-700 rounded-[2.5rem] p-8 text-white shadow-2xl flex items-center justify-between animate-in slide-in-from-top-10 duration-500">
                     <div className="flex items-center gap-6">
                         <div className="w-14 h-14 bg-white/20 rounded-2xl flex items-center justify-center backdrop-blur-md shadow-inner">
@@ -373,31 +331,20 @@ const ProductionManager = () => {
                     {role === 'OPS' && (
                         <div className="flex gap-4">
                             <button
-                                onClick={handleExecute143}
-                                disabled={isProcessing}
-                                className="bg-slate-900 text-white px-8 py-4 rounded-2xl font-black text-xs uppercase tracking-widest shadow-xl border border-white/10 hover:bg-black transition-all flex items-center gap-3 active:scale-95"
-                            >
-                                <Zap size={16} className="text-amber-400" /> Execute 1.4.3: Final Confirmation
-                            </button>
-                            <button
-                                onClick={handleBatchApprove}
-                                disabled={isProcessing || !orders.some(o => o.status === 'PENDING_APPROVAL')}
-                                className={clsx(
-                                    "px-8 py-4 rounded-2xl font-black text-xs uppercase tracking-widest transition-all flex items-center gap-3 active:scale-95 shadow-xl",
-                                    !orders.some(o => o.status === 'PENDING_APPROVAL')
-                                        ? "bg-slate-50 text-slate-300 shadow-none border border-slate-100"
-                                        : "bg-emerald-600 text-white shadow-emerald-200 hover:bg-emerald-700"
-                                )}
-                            >
-                                <ShieldCheck size={16} /> Batch Approve Orders
-                            </button>
-                            <button
                                 onClick={handleGeneratePlan}
                                 disabled={isProcessing}
                                 className="bg-blue-600 text-white px-8 py-4 rounded-2xl font-black text-xs uppercase tracking-widest shadow-xl shadow-blue-200 hover:bg-blue-700 transition-all flex items-center gap-3 active:scale-95 disabled:opacity-50"
                             >
                                 {isProcessing ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} />}
                                 Generate Production Plan
+                            </button>
+                            <button
+                                onClick={handleFinalConfirmation}
+                                disabled={isProcessing || orders.length === 0}
+                                className="bg-slate-900 text-white px-8 py-4 rounded-2xl font-black text-xs uppercase tracking-widest shadow-xl hover:bg-black transition-all flex items-center gap-3 active:scale-95 disabled:opacity-50"
+                            >
+                                <CheckSquare size={16} className="text-emerald-400" />
+                                Execute 1.4.3: Final Confirmation
                             </button>
                         </div>
                     )}
@@ -414,18 +361,14 @@ const ProductionManager = () => {
                             )}
                             {(!showNextStep || showSyncBanner || isSimulating) && (
                                 <button
-                                    onClick={handleBulkConfirm}
-                                    disabled={isProcessing || isSimulating || orders.some(o => o.status === 'PENDING_APPROVAL')}
+                                    onClick={handleBatchConfirmActual}
+                                    disabled={isProcessing || isSimulating}
                                     className={clsx(
                                         "px-8 py-4 rounded-2xl font-black text-xs uppercase tracking-widest transition-all flex items-center gap-3 active:scale-95 shadow-xl",
-                                        (orders.some(o => o.status === 'PENDING_APPROVAL') || showNextStep)
-                                            ? "bg-slate-100 text-slate-400 cursor-not-allowed shadow-none"
-                                            : "bg-emerald-600 text-white shadow-emerald-200 hover:bg-emerald-700"
+                                        "bg-emerald-600 text-white shadow-emerald-200 hover:bg-emerald-700"
                                     )}
                                 >
-                                    {isSimulating ? <Loader2 size={16} className="animate-spin" /> : <CheckCircle size={16} />}
-                                    {orders.some(o => o.status === 'PENDING_APPROVAL') ? "Batch Lock (Pending Approval)" :
-                                        showNextStep ? "All Proposals Confirmed" : "Batch Confirm All Proposals"}
+                                    <CheckCircle size={16} /> Batch Confirm All Proposals
                                 </button>
                             )}
                         </div>
@@ -436,7 +379,16 @@ const ProductionManager = () => {
 
 
             {/* Main Grid */}
-            <div className="bg-white rounded-[3rem] border border-slate-100 shadow-xl overflow-hidden min-h-[500px]">
+            <div className="bg-white rounded-[3rem] border border-slate-100 shadow-xl overflow-hidden min-h-[500px] relative">
+                {isProcessing && (
+                    <div className="absolute inset-0 z-50 bg-white/80 backdrop-blur-sm flex flex-col items-center justify-center space-y-4 animate-in fade-in duration-300">
+                        <div className="w-16 h-16 border-4 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
+                        <div className="text-center">
+                            <h4 className="text-xl font-black text-slate-900 uppercase">Synchronizing Production Node</h4>
+                            <p className="text-slate-500 font-medium text-xs">Connecting to n8n PSS Engine... This may take up to 30 seconds.</p>
+                        </div>
+                    </div>
+                )}
                 <div className="table-container sticky-header">
                     <table className="w-full text-left border-collapse">
                         <thead>
@@ -450,7 +402,39 @@ const ProductionManager = () => {
                                 <th className="p-8 text-[10px] font-black text-slate-400 uppercase tracking-widest text-right pr-10">Action</th>
                             </tr>
                         </thead>
-                        <tbody className="divide-y divide-slate-50">
+                        <tbody className="divide-y divide-slate-50 relative">
+                            {/* Alert Tracker Overlay at top of table area */}
+                            {(() => {
+                                const alertCount = orders.filter(o => o.status === 'PROPOSAL' || o.status === 'PENDING_APPROVAL').length;
+                                if (alertCount > 0) {
+                                    return (
+                                        <div className="absolute top-[-70px] right-8 z-10 flex items-center gap-3 bg-amber-50 border border-amber-100 px-4 py-2 rounded-xl animate-in fade-in slide-in-from-right">
+                                            <div className="flex items-center gap-2">
+                                                <AlertTriangle size={14} className="text-amber-500" />
+                                                <span className="text-[10px] font-black text-amber-700 uppercase tracking-tight">
+                                                    {alertCount} Pending Actions
+                                                </span>
+                                            </div>
+                                            <button
+                                                onClick={() => scrollToAlert(currentAlertIndex)}
+                                                disabled={isNavigating}
+                                                className="bg-amber-500 text-white px-3 py-1 rounded-lg text-[9px] font-black uppercase hover:bg-amber-600 transition-all active:scale-95 flex items-center gap-2 min-w-[100px] justify-center"
+                                            >
+                                                {isNavigating ? (
+                                                    <>
+                                                        <Loader2 size={10} className="animate-spin" /> Locating...
+                                                    </>
+                                                ) : (
+                                                    <>
+                                                        Jump to Next <ChevronRight size={10} className="inline" />
+                                                    </>
+                                                )}
+                                            </button>
+                                        </div>
+                                    );
+                                }
+                                return null;
+                            })()}
                             {loading ? (
                                 <tr>
                                     <td colSpan="7" className="p-20 text-center">
@@ -472,11 +456,24 @@ const ProductionManager = () => {
                                 const variance = Math.abs(inputs.triggerQty - order.proposedQty) / order.proposedQty;
                                 const hasVarianceError = variance > 0.1;
 
+                                // Find global alert index for jumping
+                                let alertId = null;
+                                if (isDraft || isPending) {
+                                    const alertedRows = orders.filter(o => o.status === 'PROPOSAL' || o.status === 'PENDING_APPROVAL');
+                                    const alertIdx = alertedRows.findIndex(o => o.planId === order.planId);
+                                    if (alertIdx !== -1) alertId = `alert-row-${alertIdx}`;
+                                }
+
                                 return (
-                                    <tr key={order.planId} className={clsx(
-                                        "hover:bg-slate-50/50 transition-all group",
-                                        hasVarianceError && "bg-amber-50/30"
-                                    )}>
+                                    <tr
+                                        key={order.planId}
+                                        id={alertId}
+                                        className={clsx(
+                                            "hover:bg-slate-50/50 transition-all group scroll-mt-32",
+                                            (isDraft || isPending) && "bg-blue-50/5",
+                                            hasVarianceError && "bg-amber-50/30"
+                                        )}
+                                    >
                                         <td className="p-8">
                                             <div className="flex flex-col">
                                                 <span className="text-sm font-black text-slate-900 leading-none">
@@ -546,14 +543,16 @@ const ProductionManager = () => {
                                             <div className="flex flex-col items-center gap-1">
                                                 <span className={clsx(
                                                     "px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest border",
-                                                    order.status === 'CONFIRMED' ? "bg-emerald-50 text-emerald-600 border-emerald-100" :
-                                                        order.status === 'PROPOSAL' ? "bg-blue-50 text-blue-600 border-blue-100" :
+                                                    (order.status === 'CONFIRMED' || order.status === 'APPROVED' || order.status === 'CONFIRMED_RPO') ? "bg-emerald-50 text-emerald-600 border-emerald-100" :
+                                                        order.status === 'PROPOSAL' ? (role === 'OPS' ? "bg-blue-50 text-blue-600 border-blue-100" : "bg-blue-50 text-blue-600 border-blue-100") :
                                                             order.status === 'PENDING_APPROVAL' ? "bg-amber-50 text-amber-600 border-amber-100" :
                                                                 "bg-slate-50 text-slate-400 border-slate-100"
                                                 )}>
-                                                    {order.status}
+                                                    {(order.status === 'CONFIRMED' || order.status === 'APPROVED' || order.status === 'CONFIRMED_RPO') ? 'Approved' :
+                                                        (order.status === 'PROPOSAL' && role === 'OPS') ? 'Pending_Supplier_Input' :
+                                                            order.status}
                                                 </span>
-                                                {role === 'OPS' && order.status === 'PROPOSAL' && (
+                                                {role === 'OPS' && (order.status === 'PROPOSAL' || order.status === 'PENDING_SUPPLIER_INPUT') && (
                                                     <span className="flex items-center gap-1 text-[8px] font-black text-emerald-500 uppercase italic">
                                                         <Bell size={8} /> Notification Sent
                                                     </span>
@@ -565,17 +564,17 @@ const ProductionManager = () => {
                                             <div className="flex items-center justify-end gap-3">
                                                 {role === 'SUPPLIER' && isDraft && (
                                                     <button
-                                                        onClick={() => handleConfirmOrder(order.planId)}
+                                                        onClick={() => handleConfirmOrderInput(order.planId)}
                                                         disabled={isProcessing || !inputs.friDate}
                                                         className="bg-emerald-600 text-white px-6 py-2 rounded-xl font-black text-[10px] uppercase tracking-widest shadow-lg shadow-emerald-100 hover:bg-emerald-700 transition-all disabled:opacity-30 disabled:grayscale"
                                                     >
                                                         Confirm Order
                                                     </button>
                                                 )}
-                                                {order.status === 'CONFIRMED' && (
+                                                {(order.status === 'CONFIRMED' || order.status === 'APPROVED' || order.status === 'CONFIRMED_RPO') && (
                                                     <div className="flex items-center gap-2 text-emerald-500">
                                                         <ShieldCheck size={18} />
-                                                        <span className="text-[10px] font-black uppercase italic tracking-tighter">EDI Transmitted</span>
+                                                        <span className="text-[10px] font-black uppercase italic tracking-tighter">Approved & EDI Sent</span>
                                                     </div>
                                                 )}
                                                 {/* Chat Button */}
@@ -634,20 +633,31 @@ const ProductionManager = () => {
                             {ediDisplay && (
                                 <div className="bg-black/60 rounded-2xl p-6 border border-emerald-500/20 animate-in fade-in slide-in-from-top-4">
                                     <div className="flex items-center justify-between mb-4">
-                                        <div className="flex items-center gap-2">
-                                            <FileText size={14} className="text-emerald-500" />
-                                            <span className="text-emerald-500 font-black uppercase tracking-widest">Live Generated EDI 850 Segment</span>
+                                        <div className="flex items-center gap-4">
+                                            <div className="flex items-center gap-2">
+                                                <FileText size={14} className="text-emerald-500" />
+                                                <span className="text-emerald-500 font-black uppercase tracking-widest">Live Generated EDI 850 Segment</span>
+                                            </div>
+                                            <div className="bg-emerald-500/20 text-emerald-400 px-3 py-1 rounded-lg text-[9px] font-black uppercase">1.4 Completed</div>
                                         </div>
-                                        {ediLink && (
-                                            <a
-                                                href={ediLink}
-                                                target="_blank"
-                                                rel="noreferrer"
-                                                className="text-blue-400 hover:text-blue-300 flex items-center gap-1 border-b border-blue-400/30 font-bold"
+                                        <div className="flex items-center gap-4">
+                                            <button
+                                                onClick={() => navigate('/inventory')}
+                                                className="bg-emerald-600 text-white px-4 py-2 rounded-xl text-[9px] font-black uppercase tracking-widest hover:bg-emerald-700 transition-all flex items-center gap-2"
                                             >
-                                                Download .edi File
-                                            </a>
-                                        )}
+                                                Move to 1.5 Inventory <ChevronRight size={14} />
+                                            </button>
+                                            {ediLink && (
+                                                <a
+                                                    href={ediLink}
+                                                    target="_blank"
+                                                    rel="noreferrer"
+                                                    className="text-blue-400 hover:text-blue-300 flex items-center gap-1 border-b border-blue-400/30 font-bold"
+                                                >
+                                                    Download .edi File
+                                                </a>
+                                            )}
+                                        </div>
                                     </div>
                                     <pre className="text-emerald-400 font-mono text-[11px] leading-relaxed whitespace-pre-wrap overflow-auto max-h-[400px] bg-slate-900/50 p-4 rounded-xl custom-scrollbar border border-white/5">
                                         {ediDisplay}
@@ -677,9 +687,23 @@ const ProductionManager = () => {
                                         <span className="text-slate-500 italic max-w-sm truncate">— {log.message}</span>
                                     </div>
                                 )) : !isProcessing && !isSimulating && (
-                                    <div className="py-10 text-center space-y-3 opacity-40">
-                                        <Loader2 size={24} className="animate-spin mx-auto text-emerald-500" />
-                                        <p className="text-emerald-500 font-black uppercase tracking-[0.3em]">Awaiting EDI 850 Handshake...</p>
+                                    <div className="py-10 text-center space-y-6">
+                                        <div className="flex flex-col items-center gap-4 opacity-40">
+                                            <Loader2 size={24} className="animate-spin text-emerald-500" />
+                                            <p className="text-emerald-500 font-black uppercase tracking-[0.3em]">Awaiting EDI 850 Handshake...</p>
+                                        </div>
+                                        {/* 1.4 Completed Quick Action */}
+                                        <div className="flex flex-col items-center pt-8 border-t border-white/5 space-y-4">
+                                            <div className="flex items-center gap-2 text-emerald-400 font-black text-[10px] uppercase tracking-widest">
+                                                <CheckCircle size={14} /> 1.4 Cycle Active
+                                            </div>
+                                            <button
+                                                onClick={() => navigate('/inventory')}
+                                                className="bg-emerald-600 text-white px-8 py-3 rounded-2xl font-black text-[10px] uppercase tracking-[0.2em] shadow-lg shadow-emerald-500/20 hover:bg-emerald-700 transition-all flex items-center gap-3"
+                                            >
+                                                1.4 Completed: Move to 1.5 Inventory <ChevronRight size={16} />
+                                            </button>
+                                        </div>
                                     </div>
                                 )}
                             </div>

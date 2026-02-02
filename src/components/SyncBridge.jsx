@@ -4,7 +4,7 @@ import { groupSystemSync, fetchSupplyPlan, fetchWorkingOrders, clearLocalWorkflo
 import { clsx } from 'clsx';
 import Papa from 'papaparse';
 
-const SyncBridge = ({ onSyncComplete, showPush = true, showPull = true }) => {
+const SyncBridge = ({ onSyncComplete, showPush = true, showPull = true, hidePullBox = false }) => {
     // Persist status in localStorage to bridge between Tab 1.2 and 1.3
     const [step1Status, setStep1Status] = useState(localStorage.getItem('bridge_step1') || 'IDLE');
     const [step2Status, setStep2Status] = useState(localStorage.getItem('bridge_step2') || 'LOCKED');
@@ -192,11 +192,7 @@ const SyncBridge = ({ onSyncComplete, showPush = true, showPull = true }) => {
                     <p className="text-slate-500 text-xs font-semibold uppercase tracking-wider opacity-60">Push/Pull Handshake (1.2 → 1.3)</p>
                 </div>
                 <div className="flex items-center gap-6">
-                    {!showPull ? (
-                        <span className="text-[10px] font-black text-blue-600 bg-blue-50 px-4 py-2 rounded-xl uppercase tracking-widest border border-blue-100 flex items-center gap-2 cursor-default">
-                            <Zap size={14} /> Go to 1.3 Supply Plan for Direct Source Ingest
-                        </span>
-                    ) : (
+                    {showPull && (
                         <button
                             onClick={handleDirectPull}
                             className="text-[10px] font-black text-blue-600 bg-blue-50 px-4 py-2 rounded-xl uppercase tracking-widest hover:bg-blue-600 hover:text-white transition-all shadow-sm flex items-center gap-2 border border-blue-100"
@@ -215,7 +211,7 @@ const SyncBridge = ({ onSyncComplete, showPush = true, showPull = true }) => {
 
             <div className={clsx(
                 "flex flex-col xl:flex-row items-stretch gap-8 relative z-10",
-                (!showPush || !showPull) ? "justify-center" : "justify-between"
+                (!showPush || !showPull || hidePullBox) ? "justify-center" : "justify-between"
             )}>
 
                 {/* --- LEFT SIDE: STEP 1.2.2 (PUSH) --- */}
@@ -258,7 +254,7 @@ const SyncBridge = ({ onSyncComplete, showPush = true, showPull = true }) => {
                 )}
 
                 {/* --- CONNECTOR (THE BRIDGE) --- */}
-                {(showPush && showPull) && (
+                {(showPush && showPull && !hidePullBox) && (
                     <div className="flex flex-col items-center justify-center px-4 min-w-[120px]">
                         {remoteProcessing ? (
                             <div className="flex flex-col items-center animate-pulse text-blue-500 space-y-2">
@@ -277,7 +273,7 @@ const SyncBridge = ({ onSyncComplete, showPush = true, showPull = true }) => {
                 )}
 
                 {/* --- RIGHT SIDE: STEP 1.3.1 (PULL) --- */}
-                {showPull && (
+                {showPull && !hidePullBox && (
                     <div className={clsx(
                         "flex-1 p-8 rounded-[2.5rem] border transition-all relative overflow-hidden group",
                         step2Status === 'LOCKED' ? 'bg-slate-50 border-slate-100' :

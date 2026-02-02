@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Database, Activity, RefreshCw, AlertTriangle, CheckCircle, Package, TrendingUp, Search, BarChart3, Scan, ShieldAlert, Loader2, Calendar, ShieldCheck, Edit3, ArrowRight, Truck, MessageSquare } from 'lucide-react';
+import { Database, Activity, RefreshCw, AlertTriangle, CheckCircle, Package, TrendingUp, Search, BarChart3, Scan, ShieldAlert, Loader2, Calendar, ShieldCheck, Edit3, ArrowRight, Truck, MessageSquare, ChevronRight } from 'lucide-react';
 import { clsx } from 'clsx';
 import { fetchInventory, calculateOrders } from '../utils/api';
 import { useAuth } from '../context/AuthContext';
@@ -17,6 +17,28 @@ const Inventory = () => {
     const [showNextStep, setShowNextStep] = useState(false);
     const [selectedProduct, setSelectedProduct] = useState(null);
     const [adjData, setAdjData] = useState({ wip: 0, okqc: 0, comment: '' });
+    const [currentAlertIndex, setCurrentAlertIndex] = useState(-1);
+    const [isNavigating, setIsNavigating] = useState(false);
+
+    const scrollToAlert = (index) => {
+        const alertedRows = inventory.filter(row => row.okqcQty < row.safetyStock);
+
+        if (alertedRows.length > 0) {
+            setIsNavigating(true);
+            setTimeout(() => {
+                const nextIndex = (index + 1) % alertedRows.length;
+                setCurrentAlertIndex(nextIndex);
+                const targetId = `alert-row-${nextIndex}`;
+                const element = document.getElementById(targetId);
+                if (element) {
+                    element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    element.classList.add('bg-amber-50');
+                    setTimeout(() => element.classList.remove('bg-amber-50'), 2000);
+                }
+                setIsNavigating(false);
+            }, 600);
+        }
+    };
 
     // Chat State
     const [chatConfig, setChatConfig] = useState({ isOpen: false, id: null });
@@ -38,29 +60,32 @@ const Inventory = () => {
     }, []);
 
     const handleBulkSimulation = async () => {
-        if (!confirm("This will automatically validate QC for ALL In-Production items and generate 'Ship-Ready' stock. Proceed with batch mode?")) return;
+        if (!confirm("This will automatically update records based on incoming EDI pulses (OKQC status). Process stream?")) return;
 
         setIsSimulating(true);
         try {
-            // Simulate a batch process by triggering one real update and faking the rest for demo speed
+            // Simulate receiving EDI pulses
             const target = inventory[0]?.productCode || "DY101683";
             await calculateOrders("QC_UPDATE", {
                 product_code: target,
-                passed_qty: 1500, // Higher qty to show impact
+                passed_qty: 1500,
                 simulation_mode: true
             });
 
-            // Artificial delay to simulate batch processing
             await new Promise(r => setTimeout(r, 1500));
-
-            localStorage.setItem('bridge_step5', 'SUCCESS'); // Mark step complete
-            alert(`BATCH SUCCESS: 128 QC Records Validated. Inventory Ledger Updated.`);
+            alert(`EDI STREAM PROCESSED: Inventory ledger updated for OKQC + In Production records.`);
             await loadData();
-            setShowNextStep(true);
         } catch (err) {
             alert("Simulation failed: " + err.message);
         } finally {
             setIsSimulating(false);
+        }
+    };
+
+    const handleSupplierConfirmInventory = () => {
+        if (confirm("Confirm that inventory is validated and ready for transport booking?")) {
+            setShowNextStep(true);
+            localStorage.setItem('bridge_step5', 'SUCCESS');
         }
     };
 
@@ -146,19 +171,19 @@ const Inventory = () => {
                             </button>
                         )}
                         {role === 'SUPPLIER' && (
-                            <div className="bg-emerald-50 border border-emerald-100 px-6 py-4 rounded-2xl flex items-center gap-3">
-                                <ShieldCheck className="text-emerald-600" size={20} />
-                                <span className="text-[10px] font-black text-emerald-700 uppercase tracking-widest">
-                                    Step 1.5.3: Supplier Review Mode (Read-Only)
-                                </span>
-                            </div>
+                            <button
+                                onClick={handleSupplierConfirmInventory}
+                                className="bg-emerald-600 text-white px-8 py-4 rounded-2xl font-black text-xs uppercase tracking-widest shadow-xl hover:bg-emerald-700 transition-all active:scale-95 flex items-center gap-2"
+                            >
+                                <ShieldCheck size={16} /> Confirm Inventory Validation
+                            </button>
                         )}
                     </div>
                 </div>
             </div>
 
-            {/* Next Step Card */}
-            {showNextStep && (
+            {/* Next Step Card - Role Restricted to OPS */}
+            {showNextStep && role === 'OPS' && (
                 <div onClick={() => navigate('/shipments')} className="bg-emerald-900 rounded-[3rem] p-10 text-white shadow-xl flex items-center justify-between group cursor-pointer animate-in slide-in-from-bottom hover:scale-[1.01] transition-all relative overflow-hidden">
                     <div className="absolute top-0 right-0 p-8 opacity-10">
                         <Truck size={200} />
@@ -186,9 +211,42 @@ const Inventory = () => {
                         </div>
                         <div className="space-y-1">
                             <h4 className="text-2xl font-black text-slate-900 uppercase tracking-tight">Inventory</h4>
-                            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Global Stock Control Control (WIP & OKQC)</p>
+                            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Global Stock Control (WIP & OKQC)</p>
                         </div>
                     </div>
+
+                    {/* Alert Tracker */}
+                    {(() => {
+                        const alertCount = inventory.filter(row => row.okqcQty < row.safetyStock).length;
+                        if (alertCount > 0) {
+                            return (
+                                <div className="flex items-center gap-3 bg-amber-50 border border-amber-100 px-4 py-2 rounded-xl animate-in fade-in slide-in-from-right">
+                                    <div className="flex items-center gap-2">
+                                        <ShieldAlert size={14} className="text-amber-500" />
+                                        <span className="text-[10px] font-black text-amber-700 uppercase tracking-tight">
+                                            {alertCount} Critical Shortages
+                                        </span>
+                                    </div>
+                                    <button
+                                        onClick={() => scrollToAlert(currentAlertIndex)}
+                                        disabled={isNavigating}
+                                        className="bg-amber-500 text-white px-3 py-1 rounded-lg text-[9px] font-black uppercase hover:bg-amber-600 transition-all active:scale-95 flex items-center gap-2 min-w-[100px] justify-center"
+                                    >
+                                        {isNavigating ? (
+                                            <>
+                                                <Loader2 size={10} className="animate-spin" /> Locating...
+                                            </>
+                                        ) : (
+                                            <>
+                                                Jump to Next <ChevronRight size={10} />
+                                            </>
+                                        )}
+                                    </button>
+                                </div>
+                            );
+                        }
+                        return null;
+                    })()}
                 </div>
 
                 <div className="table-container sticky-header">
@@ -206,8 +264,24 @@ const Inventory = () => {
                         <tbody className="divide-y divide-slate-50">
                             {inventory.map((row, idx) => {
                                 const isLow = row.okqcQty < row.safetyStock;
+
+                                // Find global alert index for jumping
+                                let alertId = null;
+                                if (isLow) {
+                                    const alertedRows = inventory.filter(r => r.okqcQty < r.safetyStock);
+                                    const alertIdx = alertedRows.findIndex(r => r.productCode === row.productCode);
+                                    if (alertIdx !== -1) alertId = `alert-row-${alertIdx}`;
+                                }
+
                                 return (
-                                    <tr key={idx} className="hover:bg-slate-50/50 transition-all transition-all duration-300">
+                                    <tr
+                                        key={idx}
+                                        id={alertId}
+                                        className={clsx(
+                                            "hover:bg-slate-50/50 transition-all duration-300 scroll-mt-32",
+                                            isLow && "bg-amber-50/5"
+                                        )}
+                                    >
                                         <td className="p-8">
                                             <div className="flex items-center gap-4">
                                                 <div className="w-10 h-10 bg-slate-100 rounded-xl flex items-center justify-center text-slate-400">

@@ -138,7 +138,7 @@ async function request(endpoint, options = {}, mockFallback = null) {
 
 export const fetchDashboardStats = () => request('/dashboard-stats', { method: 'GET' }, mockDashboardStats);
 export const fetchSupplyPlan = async (version = "LATEST") => {
-    const csvUrl = 'https://docs.google.com/spreadsheets/d/1TaqgVyZHO2VWTSxFI0vWVVJ08MGKAw1ZgpajgZWcFUM/export?format=csv&gid=221473829';
+    const csvUrl = `https://docs.google.com/spreadsheets/d/1TaqgVyZHO2VWTSxFI0vWVVJ08MGKAw1ZgpajgZWcFUM/export?format=csv&gid=221473829&t=${Date.now()}`;
     try {
         const response = await fetch(csvUrl);
         const csvData = await response.text();
@@ -205,7 +205,7 @@ export const fetchSupplyPlanVersions = async () => {
     ];
 };
 export const fetchWorkingOrders = async () => {
-    const csvUrl = 'https://docs.google.com/spreadsheets/d/1TaqgVyZHO2VWTSxFI0vWVVJ08MGKAw1ZgpajgZWcFUM/export?format=csv&gid=1538758206';
+    const csvUrl = `https://docs.google.com/spreadsheets/d/1TaqgVyZHO2VWTSxFI0vWVVJ08MGKAw1ZgpajgZWcFUM/export?format=csv&gid=1538758206&t=${Date.now()}`;
     const response = await fetch(csvUrl);
     const csvData = await response.text();
     return new Promise((resolve, reject) => {
@@ -224,10 +224,12 @@ export const fetchWorkingOrders = async () => {
                         let triggerQty = parseInt(row.Trigger_Qty || 0);
                         let friDate = row.Confirmed_FRI_Date || '';
 
-                        if (isReset && (status === 'CONFIRMED_RPO' || status === 'APPROVED')) {
+                        // If user has manually confirmed (1.4.3), show as Approved
+                        if (!isReset && (status === 'CONFIRMED_RPO' || status === 'APPROVED')) {
+                            status = 'Approved';
+                        } else if (isReset && (status === 'CONFIRMED_RPO' || status === 'APPROVED')) {
+                            // Force back to proposal for demo flow until 1.4.3 is clicked
                             status = 'PROPOSAL';
-                            triggerQty = 0;
-                            friDate = '';
                         }
 
                         const isConfirmed = status === 'CONFIRMED_RPO' || status === 'APPROVED';
@@ -364,7 +366,7 @@ export const fetchShipments = async () => {
 };
 
 export const fetchShipmentProposals = async () => {
-    const csvUrl = 'https://docs.google.com/spreadsheets/d/1TaqgVyZHO2VWTSxFI0vWVVJ08MGKAw1ZgpajgZWcFUM/export?format=csv&gid=1592123495';
+    const csvUrl = `https://docs.google.com/spreadsheets/d/1TaqgVyZHO2VWTSxFI0vWVVJ08MGKAw1ZgpajgZWcFUM/export?format=csv&gid=1592123495&t=${Date.now()}`;
     try {
         const response = await fetch(csvUrl);
         const csvData = await response.text();
@@ -385,7 +387,7 @@ export const fetchShipmentProposals = async () => {
 };
 
 export const fetchShipmentLines = async (shipmentId) => {
-    const csvUrl = 'https://docs.google.com/spreadsheets/d/1TaqgVyZHO2VWTSxFI0vWVVJ08MGKAw1ZgpajgZWcFUM/export?format=csv&gid=789123456'; // Placeholder GID for Shipment_Lines
+    const csvUrl = `https://docs.google.com/spreadsheets/d/1TaqgVyZHO2VWTSxFI0vWVVJ08MGKAw1ZgpajgZWcFUM/export?format=csv&gid=789123456&t=${Date.now()}`; // Placeholder GID for Shipment_Lines
     const response = await fetch(csvUrl);
     const csvData = await response.text();
     return new Promise((resolve, reject) => {
@@ -408,7 +410,7 @@ export const fetchShipmentLines = async (shipmentId) => {
 };
 
 export const fetchIntegrationLogs = async () => {
-    const csvUrl = 'https://docs.google.com/spreadsheets/d/1TaqgVyZHO2VWTSxFI0vWVVJ08MGKAw1ZgpajgZWcFUM/export?format=csv&gid=2037651031';
+    const csvUrl = `https://docs.google.com/spreadsheets/d/1TaqgVyZHO2VWTSxFI0vWVVJ08MGKAw1ZgpajgZWcFUM/export?format=csv&gid=2037651031&t=${Date.now()}`;
     const response = await fetch(csvUrl);
     const csvData = await response.text();
     return new Promise((resolve, reject) => {
@@ -779,6 +781,7 @@ export const sendChatMessage = (payload) =>
  */
 export const clearLocalWorkflowState = () => {
     const flags = [
+        'prereq_masterDataSynced',
         'prereq_assortmentConfirmed',
         'orion_registered_skus',
         'prereq_paramsSaved',

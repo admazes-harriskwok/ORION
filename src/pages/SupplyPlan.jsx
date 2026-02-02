@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { ClipboardList, CheckCircle, Globe, Database, ChevronRight, Package, Truck } from 'lucide-react';
+import { ClipboardList, CheckCircle, Globe, Database, ChevronRight, Package, Truck, Loader2 } from 'lucide-react';
 import { clsx } from 'clsx';
 import { fetchSupplyPlan, fetchSupplyPlanVersions } from '../utils/api';
 import { useNavigate } from 'react-router-dom';
@@ -16,6 +16,31 @@ const SupplyPlan = () => {
     const [selectedVersion, setSelectedVersion] = useState('202512');
     const [prevPlanData, setPrevPlanData] = useState([]); // For change tracking
     const [searchQuery, setSearchQuery] = useState('');
+    const [currentAlertIndex, setCurrentAlertIndex] = useState(-1);
+    const [isNavigating, setIsNavigating] = useState(false);
+
+    const scrollToAlert = (index) => {
+        const alertedRows = planData.filter(row => {
+            const prevQty = getPrevQty(row.planId, row.productCode);
+            return prevQty !== null && prevQty !== row.netReq;
+        });
+
+        if (alertedRows.length > 0) {
+            setIsNavigating(true);
+            setTimeout(() => {
+                const nextIndex = (index + 1) % alertedRows.length;
+                setCurrentAlertIndex(nextIndex);
+                const targetId = `alert-row-${nextIndex}`;
+                const element = document.getElementById(targetId);
+                if (element) {
+                    element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    element.classList.add('bg-amber-50/50');
+                    setTimeout(() => element.classList.remove('bg-amber-50/50'), 2000);
+                }
+                setIsNavigating(false);
+            }, 600);
+        }
+    };
 
     const loadData = async (version) => {
         setLoading(true);
@@ -103,7 +128,7 @@ const SupplyPlan = () => {
                 )}
             </div>
 
-            <SyncBridge showPush={false} onSyncComplete={handleSyncComplete} />
+            <SyncBridge showPush={false} hidePullBox={true} onSyncComplete={handleSyncComplete} />
 
 
 
@@ -153,6 +178,42 @@ const SupplyPlan = () => {
                             <FileDown size={14} /> Extract Report
                         </button>
 
+                        {/* Alert Tracker */}
+                        {(() => {
+                            const alertCount = planData.filter(row => {
+                                const prevQty = getPrevQty(row.planId, row.productCode);
+                                return prevQty !== null && prevQty !== row.netReq;
+                            }).length;
+
+                            if (alertCount > 0) {
+                                return (
+                                    <div className="flex items-center gap-3 bg-amber-50 border border-amber-100 px-4 py-2 rounded-xl animate-in fade-in slide-in-from-right">
+                                        <div className="flex items-center gap-2">
+                                            <AlertCircle size={14} className="text-amber-500" />
+                                            <span className="text-[10px] font-black text-amber-700 uppercase tracking-tight">
+                                                {alertCount} Variance Alerts
+                                            </span>
+                                        </div>
+                                        <button
+                                            onClick={() => scrollToAlert(currentAlertIndex)}
+                                            disabled={isNavigating}
+                                            className="bg-amber-500 text-white px-3 py-1 rounded-lg text-[9px] font-black uppercase hover:bg-amber-600 transition-all active:scale-95 flex items-center gap-2 min-w-[100px] justify-center"
+                                        >
+                                            {isNavigating ? (
+                                                <>
+                                                    <Loader2 size={10} className="animate-spin" /> Locating...
+                                                </>
+                                            ) : (
+                                                <>
+                                                    Jump to Next <ChevronRight size={10} />
+                                                </>
+                                            )}
+                                        </button>
+                                    </div>
+                                );
+                            }
+                            return null;
+                        })()}
                     </div>
                 </div>
 
@@ -164,7 +225,6 @@ const SupplyPlan = () => {
                                 <th className="p-8 text-[10px] font-black text-slate-400 uppercase tracking-widest border-r border-slate-100">Logistics (Client/WH)</th>
                                 <th className="p-8 text-[10px] font-black text-slate-400 uppercase tracking-widest border-r border-slate-100">Product Identification</th>
                                 <th className="p-8 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">Supply Qty (Total)</th>
-                                <th className="p-8 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">Status</th>
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-50">
@@ -172,8 +232,26 @@ const SupplyPlan = () => {
                                 const prevQty = getPrevQty(row.planId, row.productCode);
                                 const hasChanged = prevQty !== null && prevQty !== row.netReq;
 
+                                // Find global alert index for jumping
+                                let alertId = null;
+                                if (hasChanged) {
+                                    const alertedRows = planData.filter(r => {
+                                        const p = getPrevQty(r.planId, r.productCode);
+                                        return p !== null && p !== r.netReq;
+                                    });
+                                    const alertIdx = alertedRows.findIndex(r => r.planId === row.planId && r.productCode === row.productCode);
+                                    if (alertIdx !== -1) alertId = `alert-row-${alertIdx}`;
+                                }
+
                                 return (
-                                    <tr key={idx} className="hover:bg-blue-50/10 transition-all group">
+                                    <tr
+                                        key={idx}
+                                        id={alertId}
+                                        className={clsx(
+                                            "hover:bg-blue-50/10 transition-all group scroll-mt-32",
+                                            hasChanged && "bg-amber-50/5"
+                                        )}
+                                    >
                                         <td className="p-8 border-r border-slate-50">
                                             <div className="flex flex-col">
                                                 <span className="text-[10px] font-black text-slate-900 uppercase">Ver: {row.version}</span>
@@ -227,14 +305,7 @@ const SupplyPlan = () => {
                                             )}
                                         </td>
 
-                                        <td className="p-8 text-center">
-                                            <span className={clsx(
-                                                "px-3 py-1.5 rounded-full text-[9px] font-black uppercase tracking-widest shadow-sm border",
-                                                row.status === 'PROPOSAL' || row.status === 'OPEN' ? "bg-amber-50 text-amber-600 border-amber-100" : "bg-emerald-50 text-emerald-600 border-emerald-100"
-                                            )}>
-                                                {row.status}
-                                            </span>
-                                        </td>
+
                                     </tr>
                                 );
                             }) : (

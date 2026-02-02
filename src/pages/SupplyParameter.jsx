@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Cpu, RefreshCw, CheckCircle, Database, Clock, Shield, ChevronRight, Calendar, Truck, BarChart3, Info } from 'lucide-react';
+import { Cpu, RefreshCw, CheckCircle, Database, Clock, Shield, ChevronRight, Calendar, Truck, BarChart3, Info, Zap, ArrowRight } from 'lucide-react';
 import { clsx } from 'clsx';
 import { useNavigate } from 'react-router-dom';
 import SyncBridge from '../components/SyncBridge';
@@ -125,6 +125,26 @@ const SupplyParameter = () => {
             <SyncBridge showPull={false} onSyncComplete={(type) => {
                 if (type === 'PUSH') setIsSaved(true);
             }} />
+
+            {/* Direct Source Ingest - Full Size Card */}
+            <div onClick={() => navigate('/supply-plan')} className="bg-slate-900 rounded-[3rem] p-10 text-white shadow-xl flex items-center justify-between group cursor-pointer animate-in slide-in-from-bottom hover:scale-[1.01] transition-all relative overflow-hidden">
+                <div className="absolute top-0 right-0 p-8 opacity-10">
+                    <Zap size={200} />
+                </div>
+                <div className="relative z-10">
+                    <div className="flex items-center gap-3 mb-2 text-blue-400">
+                        <Zap className="animate-pulse" size={16} />
+                        <span className="text-xs font-black uppercase tracking-widest">Alternative Path: Direct Ingest</span>
+                    </div>
+                    <h3 className="text-3xl font-black tracking-tight mb-1">Go to 1.3 Supply Plan for Direct Source Ingest</h3>
+                    <p className="text-slate-400 font-medium whitespace-pre-line">
+                        Bypass parameter sync and ingest data directly from the Group System.
+                    </p>
+                </div>
+                <div className="w-16 h-16 bg-white/10 rounded-full flex items-center justify-center group-hover:bg-white text-white group-hover:text-slate-900 transition-all relative z-10">
+                    <ArrowRight size={32} />
+                </div>
+            </div>
 
             {isSaved && (
                 <div className="bg-slate-900 rounded-[3rem] p-10 text-white shadow-xl flex items-center justify-between group cursor-pointer animate-in slide-in-from-bottom" onClick={() => navigate('/supply-plan')}>
