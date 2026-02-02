@@ -152,9 +152,18 @@ const ProductionManager = () => {
         try {
             localStorage.setItem('prereq_ordersConfirmed', 'true');
             // Connect to webhook/confirm-production-order for all unconfirmed
+            let firstEdiCaptured = false;
             for (const order of confirmable) {
                 const input = editData[order.planId] || { triggerQty: order.proposedQty, friDate: order.friDate };
-                await confirmProduction(order.planId, input.triggerQty, input.friDate);
+                const result = await confirmProduction(order.planId, input.triggerQty, input.friDate);
+
+                // Only capture and display the first EDI result to save time/clutter
+                if (!firstEdiCaptured && (result.status === 'success' || result.edi_content)) {
+                    setEdiDisplay(result.edi_content);
+                    setEdiLink(result.edi_link);
+                    setShowLogs(true);
+                    firstEdiCaptured = true;
+                }
             }
 
             await loadData();
@@ -198,10 +207,19 @@ const ProductionManager = () => {
         setIsProcessing(true);
         setShowSyncBanner(true);
         try {
+            let firstEdiCaptured = false;
             for (const order of proposalRows) {
                 const input = editData[order.planId] || { triggerQty: order.proposedQty, friDate: order.friDate };
                 if (!input.friDate) continue; // Skip incomplete
-                await confirmProduction(order.planId, input.triggerQty, input.friDate);
+                const result = await confirmProduction(order.planId, input.triggerQty, input.friDate);
+
+                // Capture first EDI only
+                if (!firstEdiCaptured && (result.status === 'success' || result.edi_content)) {
+                    setEdiDisplay(result.edi_content);
+                    setEdiLink(result.edi_link);
+                    setShowLogs(true);
+                    firstEdiCaptured = true;
+                }
                 await new Promise(r => setTimeout(r, 400));
             }
             alert("✅ SUCCESS: All orders confirmed and EDI files transmitted.");
